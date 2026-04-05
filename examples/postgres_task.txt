@@ -1,0 +1,8 @@
+帮我生成一个 postgres 13 的 Docker 环境。
+端口: 55432
+数据库名: demo_db
+用户名: demo
+密码: demo123
+配置:
+  max_connections=200
+  shared_buffers=256MB

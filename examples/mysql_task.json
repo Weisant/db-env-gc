@@ -1,0 +1,13 @@
+{
+  "db_type": "mysql",
+  "version": "8.0",
+  "port": 3307,
+  "database": "demo_db",
+  "username": "demo",
+  "password": "demo123",
+  "root_password": "root123",
+  "config": {
+    "max_connections": "180",
+    "general_log": "1"
+  }
+}

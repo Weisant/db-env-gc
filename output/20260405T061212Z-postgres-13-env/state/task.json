@@ -1,0 +1,17 @@
+{
+  "db_type": "postgres",
+  "version": "13",
+  "port": "55432",
+  "database": "demo_db",
+  "username": "demo",
+  "password": "demo123",
+  "root_password": "",
+  "project_name": "postgres-13-env",
+  "config": {
+    "max_connections": "200",
+    "shared_buffers": "256MB",
+    "log_statement": "all"
+  },
+  "notes": [],
+  "raw_request": "生成一个 postgres 13 的 docker 环境项目\n端口: 55432\n数据库名: demo_db\n用户名: demo\n密码: demo123"
+}

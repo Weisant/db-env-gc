@@ -1,0 +1,18 @@
+# 环境变量文件
+.env
+
+# 数据目录
+data/
+
+# 日志文件
+*.log
+
+# 编辑器临时文件
+*.swp
+*.swo
+*~
+.DS_Store
+
+# IDE 配置
+.idea/
+.vscode/
