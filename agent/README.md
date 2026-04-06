@@ -2,7 +2,7 @@
 
 这个目录实现了 `db-env-gc` 的核心多 agent 流水线。
 
-项目整体采用 `Plan-and-Execute` 方式运行，由一个主调度器按顺序调用多个 LLM agent，并在最后把结果落盘。
+项目整体采用 `Plan-and-Execute` 方式运行，由一个主调度器按顺序调用多个 LLM agent，并通过 `tools` 目录完成真实文件系统操作。
 
 ## 整体处理流程
 
@@ -14,12 +14,13 @@
 2. `main.py` 初始化运行环境、日志文件和主调度器
 3. 主调度器按固定计划依次调用各个 agent
 4. 每个 agent 输出结构化 JSON，作为下一个 agent 的输入
-5. 如果校验阶段发现问题，则进入修复阶段
-6. 最终由落盘模块把生成结果写入 `output/` 和 `state/` 目录
+5. `tools` 负责把 generator 产出的文件内容写到真实项目目录
+6. validator 基于真实磁盘快照做校验，并在必要时直接触发修复
+7. 最终再由 `tools` 写入 `state/` 目录
 
 当前主链路为：
 
-`用户输入 -> parser -> planner -> writer -> validator -> repair(按需) -> validator(复检，按需) -> persist`
+`用户输入 -> parser -> planner -> generator -> tools写盘 -> validator(含按需修复) -> tools写状态`
 
 ## 主调度器
 
@@ -37,7 +38,10 @@
 - 在终端打印 `Thought / Action / Observation / Step Result`
 - 将各阶段结构化输出写入 `agents_log.txt`
 
-主调度器本身不负责生成 Docker 文件，它只负责编排。
+主调度器本身不直接生成文件内容，也不直接做低层文件读写，它只负责：
+- 编排 agent
+- 调用 tools
+- 汇总状态
 
 ## 各 Agent 说明
 
@@ -92,7 +96,7 @@
 
 它的目标是把“这次项目应该长什么样”先规划清楚，再交给 writer 执行。
 
-### 3. Writer Agent
+### 3. Generator Agent
 
 位置：[generator.py](/home/wjh/db-env-gc/agent/generator.py)  
 提示词：[prompts/writer.md](/home/wjh/db-env-gc/agent/prompts/writer.md)
@@ -121,6 +125,11 @@
 
 它是项目中真正生成文件内容的核心 agent。
 
+注意：
+
+- generator 只生成内容
+- 真正写入磁盘由 `agent/tools` 完成
+
 ### 4. Validator Agent
 
 位置：[validator.py](/home/wjh/db-env-gc/agent/validator.py)  
@@ -128,14 +137,15 @@
 
 作用：
 
-- 从交付质量角度检查 writer 的输出是否完整、自洽、可交付
+- 从交付质量角度检查真实磁盘项目是否完整、自洽、可交付
+- 在必要时直接触发修复并通过 tools 覆盖文件
 
 处理逻辑：
 
 1. 接收：
   - `TaskInput`
   - `EnvSpec`
-  - `ProjectArtifacts`
+  - 真实磁盘快照
 2. 调用 LLM
 3. 输出 `ValidationReport`
 
@@ -154,53 +164,26 @@
 - `config/`、`init/`、README 是否互相一致
 - README 是否清晰说明启动方式、目录结构和关键配置
 
-它的目标是把“生成完成”提升为“可交付完成”。
+它的目标是把“生成完成”提升为“可交付完成”，并在可修复时直接完成闭环。
 
-### 5. Repair Agent
+### 5. Tools Layer
 
-位置：[repair.py](/home/wjh/db-env-gc/agent/repair.py)  
-提示词：[prompts/repair.md](/home/wjh/db-env-gc/agent/prompts/repair.md)
+位置：
 
-作用：
-
-- 根据 validator 的报告修复项目文件集合
-
-处理逻辑：
-
-1. 接收：
-  - `TaskInput`
-  - `EnvSpec`
-  - 当前 `ProjectArtifacts`
-  - `ValidationReport`
-2. 调用 LLM
-3. 输出修复后的完整 `ProjectArtifacts`
-
-注意：
-
-- repair agent 返回的是“修复后的完整项目”，不是局部 diff
-- 这样可以减少调度层合并 patch 的复杂度
-
-它的目标是形成自动修复闭环，而不是发现问题后直接失败退出。
-
-### 6. Persist Stage
-
-位置：[persist.py](/home/wjh/db-env-gc/agent/persist.py)
+- [tools/file_tools.py](/home/wjh/db-env-gc/agent/tools/file_tools.py)
+- [tools/project_tools.py](/home/wjh/db-env-gc/agent/tools/project_tools.py)
+- [tools/state_tools.py](/home/wjh/db-env-gc/agent/tools/state_tools.py)
 
 作用：
 
-- 将最终结果写入磁盘
+- 负责真实的文件系统动作，例如：
+  - 创建运行目录
+  - 写入项目文件
+  - 读取项目快照
+  - 覆盖修复后的文件
+  - 写入 `state` 状态文件
 
-处理逻辑：
-
-1. 创建本次运行目录
-2. 写入生成文件
-3. 写入状态文件：
-  - `state/task.json`
-  - `state/env_spec.json`
-  - `state/artifacts.json`
-  - `state/validation.json`
-
-它不是 LLM agent，而是确定性执行模块。
+这些 tools 不参与内容生成，也不负责理解数据库语义。
 
 ## LLM 调用层
 
@@ -216,15 +199,14 @@
 - 强制要求返回 JSON
 - 去掉模型偶尔返回的代码块包裹
 
-也就是说，当前的：
+也就是说，当前真正调用 LLM 的是：
 
 - parser
 - planner
-- writer
+- generator
 - validator
-- repair
 
-都通过这层能力去调用 LLM。
+它们都通过这层能力去调用 LLM。
 
 ## 数据流
 
@@ -277,9 +259,9 @@
 
 这个目录实现的是一个由 orchestrator 驱动的全 agent 流水线系统：
 
-- `parser / planner / writer / validator / repair` 都是独立的 LLM agent
-- `persist` 是最终落盘模块
-- 所有 agent 通过结构化 JSON 串联
+- `parser / planner / generator / validator` 是当前的核心 LLM agent
+- `tools` 是纯文件系统执行层
+- validator 已经内聚了“发现问题后按需修复”的能力
 - 最终产出完整的 Docker 项目和状态文件
 
 如果后续还要扩展，可以继续在这个目录下增加：

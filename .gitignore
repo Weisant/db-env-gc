@@ -1,0 +1,13 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Runtime logs
+agents_log.txt
+terminal_log.txt
+
+# Generated runs
+output/
+
+# Local secrets
+agent/.env

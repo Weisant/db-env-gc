@@ -1,9 +1,0 @@
-{
-  "passed": true,
-  "findings": [],
-  "warnings": [
-    ".gitignore 文件存在但未在 README.md 目录结构中说明",
-    "README.md 目录结构中的代码块格式使用了非标准 markdown（缺少  标记）"
-  ],
-  "repair_instructions": []
-}
