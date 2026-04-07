@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,21 +38,30 @@ class StepOutcome:
     action: str
     observation: str
     result: str
+    duration_seconds: float
 
 
 class DBEnvGenerationAgent:
     """数据库环境项目生成主调度器。"""
 
-    def __init__(self, project_directory: Path, log_file_path: Path) -> None:
+    def __init__(
+        self,
+        project_directory: Path,
+        log_file_path: Path,
+        enable_validator: bool = True,
+    ) -> None:
         self.project_directory = project_directory
         self.log_file_path = log_file_path
+        # 这里允许调用方按需关闭 validator，
+        # 适合只想快速生成项目、不关心自动校验与自动修复的场景。
+        self.enable_validator = enable_validator
         self.client = JsonChatClient(load_settings())
 
     def run(self, user_input: str) -> str:
         """执行完整流水线。
 
         当前版本的主链路为：
-        parser -> planner -> generator -> tools写盘 -> validator(含自动修复) -> tools写状态
+        parser -> planner -> generator -> tools写盘 -> validator(可选，含自动修复) -> tools写状态
         """
         plan = self.create_plan()
         print("\n" + "=" * 72)
@@ -70,9 +80,11 @@ class DBEnvGenerationAgent:
         for index, step in enumerate(plan, start=1):
             print("\n" + "=" * 72)
             print(f"🚀 任务 {index} 开始")
-            print(f"当前 Agent：{self.get_step_agent_name(index)}")
+            print(f"当前阶段执行方：{self.get_step_executor_label(index)}")
             print(f"当前任务：{step}")
             print("=" * 72)
+            # 每个阶段单独计时，方便定位真正慢的是哪个 agent。
+            step_start_time = time.time()
 
             if index == 1:
                 task = parse_task(user_input, self.client)
@@ -80,7 +92,11 @@ class DBEnvGenerationAgent:
                     thought="先把原始需求整理成统一结构，避免后续 agent 对同一输入产生不同理解。",
                     action="parse_task(user_input, client)",
                     observation=json.dumps(task.to_dict(), ensure_ascii=False, indent=2),
-                    result=f"已识别数据库类型为 {task.db_type}，版本为 {task.version}。",
+                    result=(
+                        f"已识别 CVE 编号为 {task.cve_id or '未提供'}，"
+                        f"数据库类型为 {task.db_type}，版本为 {task.version}。"
+                    ),
+                    duration_seconds=round(time.time() - step_start_time, 2),
                 )
                 self.log_agent_payload("parser", task.to_dict())
             elif index == 2:
@@ -91,6 +107,7 @@ class DBEnvGenerationAgent:
                     action="build_env_spec(task, client)",
                     observation=json.dumps(env_spec.to_dict(), ensure_ascii=False, indent=2),
                     result=f"已完成环境规划，项目名为 {env_spec.project_name}。",
+                    duration_seconds=round(time.time() - step_start_time, 2),
                 )
                 self.log_agent_payload("planner", env_spec.to_dict())
             elif index == 3:
@@ -102,6 +119,7 @@ class DBEnvGenerationAgent:
                     action="generate_project(task, env_spec, client)",
                     observation=json.dumps(
                         {
+                            "cve_id": artifacts.cve_id,
                             "project_name": artifacts.project_name,
                             "generated_files": [file.path for file in artifacts.files],
                         },
@@ -109,6 +127,7 @@ class DBEnvGenerationAgent:
                         indent=2,
                     ),
                     result=f"已生成 {len(artifacts.files)} 个文件内容。",
+                    duration_seconds=round(time.time() - step_start_time, 2),
                 )
                 self.log_agent_payload("generator", artifacts.to_dict())
             elif index == 4:
@@ -120,35 +139,60 @@ class DBEnvGenerationAgent:
                 run_dir = create_run_directory(self.project_directory, env_spec.project_name)
                 written_files = write_project(run_dir, artifacts.files)
 
-                # validator 读取真实磁盘快照进行检查，并在必要时自动修复。
-                validation, artifacts, repaired = validate_project(
-                    task=task,
-                    env_spec=env_spec,
-                    artifacts=artifacts,
-                    run_dir=run_dir,
-                    client=self.client,
-                )
-                snapshot = read_project_snapshot(run_dir)
+                if self.enable_validator:
+                    # validator 读取真实磁盘快照进行检查，并在必要时自动修复。
+                    validation, artifacts, repaired = validate_project(
+                        task=task,
+                        env_spec=env_spec,
+                        artifacts=artifacts,
+                        run_dir=run_dir,
+                        client=self.client,
+                    )
+                    snapshot = read_project_snapshot(run_dir)
 
-                observation = {
-                    "run_dir": str(run_dir),
-                    "written_files": written_files,
-                    "snapshot_files": [file.path for file in snapshot.files],
-                    "repaired_by_validator": repaired,
-                    "validation": validation.to_dict(),
-                }
-                outcome = StepOutcome(
-                    thought="先把文件写到真实目录，再由 validator 基于磁盘快照做校验和按需修复。",
-                    action=(
-                        "create_run_directory(...) -> write_project(...) -> "
-                        "validate_project(task, env_spec, artifacts, run_dir, client)"
-                    ),
-                    observation=json.dumps(observation, ensure_ascii=False, indent=2),
-                    result="校验通过。" if validation.passed else "校验失败。",
-                )
-                self.log_agent_payload("validator", observation)
-                if not validation.passed:
-                    raise ValueError("项目校验失败: " + "; ".join(validation.findings))
+                    observation = {
+                        "run_dir": str(run_dir),
+                        "written_files": written_files,
+                        "snapshot_files": [file.path for file in snapshot.files],
+                        "repaired_by_validator": repaired,
+                        "validation": validation.to_dict(),
+                    }
+                    outcome = StepOutcome(
+                        thought="先把文件写到真实目录，再由 validator 基于磁盘快照做校验和按需修复。",
+                        action=(
+                            "create_run_directory(...) -> write_project(...) -> "
+                            "validate_project(task, env_spec, artifacts, run_dir, client)"
+                        ),
+                        observation=json.dumps(observation, ensure_ascii=False, indent=2),
+                        result="校验通过。" if validation.passed else "校验失败。",
+                        duration_seconds=round(time.time() - step_start_time, 2),
+                    )
+                    self.log_agent_payload("validator", observation)
+                    if not validation.passed:
+                        raise ValueError("项目校验失败: " + "; ".join(validation.findings))
+                else:
+                    # 当用户通过 CLI 参数关闭 validator 时，
+                    # 这里仍然构造一份结构化校验结果，方便后续状态文件和最终摘要保持统一。
+                    validation = ValidationReport(
+                        passed=True,
+                        findings=[],
+                        warnings=["用户通过命令行参数跳过 validator 阶段，项目未经过自动校验。"],
+                        repair_instructions=[],
+                    )
+                    observation = {
+                        "run_dir": str(run_dir),
+                        "written_files": written_files,
+                        "validator_enabled": False,
+                        "validation": validation.to_dict(),
+                    }
+                    outcome = StepOutcome(
+                        thought="本轮只需要快速生成项目并写入磁盘，因此跳过 validator 阶段。",
+                        action="create_run_directory(...) -> write_project(...)",
+                        observation=json.dumps(observation, ensure_ascii=False, indent=2),
+                        result="项目已写入，validator 已按用户参数跳过。",
+                        duration_seconds=round(time.time() - step_start_time, 2),
+                    )
+                    self.log_agent_payload("tools", observation)
             else:
                 assert task is not None
                 assert env_spec is not None
@@ -182,6 +226,7 @@ class DBEnvGenerationAgent:
                         indent=2,
                     ),
                     result=f"项目已写入 {run_dir}，状态文件已同步落盘。",
+                    duration_seconds=round(time.time() - step_start_time, 2),
                 )
                 self.log_agent_payload("tools", pipeline_result.to_dict())
 
@@ -193,11 +238,16 @@ class DBEnvGenerationAgent:
 
     def create_plan(self) -> list[str]:
         """定义固定的执行计划。"""
+        step_four = (
+            "使用 tools 写入项目，并由 validator 校验和按需修复"
+            if self.enable_validator
+            else "使用 tools 写入项目，并按用户参数跳过 validator 校验"
+        )
         return [
             "解析用户输入并标准化数据库环境需求",
             "生成环境规划，明确要输出的 Docker 项目结构",
             "调用 LLM 生成完整的 Docker 项目文件内容集合",
-            "使用 tools 写入项目，并由 validator 校验和按需修复",
+            step_four,
             "使用 tools 写入状态文件并整理最终交付信息",
         ]
 
@@ -210,35 +260,39 @@ class DBEnvGenerationAgent:
             else ""
         )
         return (
-            f"已生成 {result.task.db_type} {result.task.version} 的 Docker 环境项目，"
+            f"已生成 "
+            f"{result.task.cve_id + ' 对应的' if result.task.cve_id else ''}"
+            f"{result.task.db_type} {result.task.version} Docker 环境项目，"
             f"输出目录为 {result.run_dir}。主要文件包括 {generated_files}。"
             f"{warnings}"
         )
 
-    def get_step_agent_name(self, step_index: int) -> str:
-        """根据步骤序号返回当前阶段的主要执行角色。
+    def get_step_executor_label(self, step_index: int) -> str:
+        """根据步骤序号返回当前阶段的执行方标签。
 
-        这个方法只服务于终端可读性：
-        用户在看到“任务开始”时，可以立刻知道当前是哪一个 agent 或 tools 在工作。
+        这里刻意不用“当前 Agent”这种说法，
+        因为有些阶段是 `validator + tools` 这种组合执行，而不是单一 agent。
         """
-        agent_names = {
+        executor_labels = {
             1: "parser",
             2: "planner",
             3: "generator",
-            4: "validator + tools",
+            4: "validator + tools" if self.enable_validator else "tools",
             5: "tools",
         }
-        return agent_names.get(step_index, "unknown")
+        return executor_labels.get(step_index, "unknown")
 
     def _print_outcome(self, operation_index: int, outcome: StepOutcome) -> None:
         """统一打印单步结果。"""
-        print(f"\n[{operation_index}] 💭 Thought:")
+        print(f"\n 💭 Thought:")
         print(outcome.thought)
-        print(f"\n[{operation_index}] 🔧 Action: {outcome.action}")
-        print(f"\n[{operation_index}] 🔍 Observation:")
+        print(f"\n 🔧 Action: {outcome.action}")
+        print(f"\n 🔍 Observation:")
         print(outcome.observation)
-        print(f"\n[{operation_index}] ✅ Step Result:")
+        print(f"\n ✅ Step Result:")
         print(outcome.result)
+        print(f"\n ⏱️ Step Duration:")
+        print(f"{outcome.duration_seconds} 秒")
         print("-" * 72)
         print("✅ 当前任务执行完成")
         print("-" * 72)

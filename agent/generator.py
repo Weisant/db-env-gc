@@ -22,7 +22,7 @@ def generate_project(
     """让 LLM 直接返回完整项目文件集合。"""
     # generator prompt 会拿到 parser 和 planner 的结构化结果，
     # 然后一次性生成完整文件内容集合，供 tools 写入磁盘。
-    system_prompt = load_prompt("writer.md")
+    system_prompt = load_prompt("generator.md")
     user_prompt = (
         "请根据下面的信息生成完整 Docker 项目文件集合 JSON。\n\n"
         "标准化任务：\n"
@@ -34,5 +34,6 @@ def generate_project(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         temperature=0.2,
+        model=client.settings.generator_model,
     )
     return ProjectArtifacts.from_dict(response)

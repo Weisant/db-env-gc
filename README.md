@@ -8,7 +8,7 @@
 2. `环境规划智能体` 生成环境规划 JSON
 3. `环境生成智能体` 产出完整 Docker 项目文件内容
 4. `tools` 把文件内容真正写入磁盘
-5. `校验智能体` 基于真实磁盘快照检查项目，并在必要时自动修复
+5. `校验智能体` 基于真实磁盘快照检查项目，并在必要时通过内部修复子步骤自动修复
 6. `tools` 再写入状态文件
 
 当前版本不涉及漏洞利用和验证逻辑，只生成可复现环境所需的 Docker 项目。
@@ -26,6 +26,12 @@ python3 main.py
 python3 main.py /home/wjh/db-env-gc/output
 ```
 
+如果你只想快速生成项目、不想执行 validator 阶段，也可以这样运行：
+
+```bash
+python3 main.py --skip-validator
+```
+
 启动后可直接输入自然语言，或输入 JSON / 键值对形式的任务描述。
 
 ## 输入示例
@@ -39,6 +45,9 @@ python3 main.py /home/wjh/db-env-gc/output
 额外配置：
 max_connections=200
 shared_buffers=256MB
+```
+```text
+生成用于复现CVE-2025-46819的Redis漏洞验证环境，使用8.2.0版本
 ```
 
 ### 键值对

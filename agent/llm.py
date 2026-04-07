@@ -38,11 +38,16 @@ class JsonChatClient:
         system_prompt: str,
         user_prompt: str,
         temperature: float = 0.1,
+        model: str | None = None,
     ) -> dict:
-        """发送一次 JSON 对话请求，并在轻微网络抖动时自动重试。"""
+        """发送一次 JSON 对话请求，并在轻微网络抖动时自动重试。
+
+        `model` 用于按阶段切换模型；
+        没传时自动回退到默认模型。
+        """
         url = f"{self.settings.base_url.rstrip('/')}/chat/completions"
         payload = {
-            "model": self.settings.model_name,
+            "model": model or self.settings.default_model,
             "temperature": temperature,
             "response_format": {"type": "json_object"},
             "messages": [

@@ -30,6 +30,7 @@ def parse_task(raw_request: str, client: JsonChatClient) -> TaskInput:
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         temperature=0,
+        model=client.settings.parser_model,
     )
     # 无论模型是否回显 `raw_request`，这里都以当前真实输入为准，避免上下文漂移。
     task_data = dict(response)

@@ -53,6 +53,7 @@ class TaskInput:
     后续 planner / generator / validator 都基于它工作。
     """
 
+    cve_id: str
     db_type: str
     version: str
     port: str
@@ -68,6 +69,7 @@ class TaskInput:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TaskInput":
         return cls(
+            cve_id=_ensure_str(data.get("cve_id"), "cve_id"),
             db_type=_ensure_str(data.get("db_type"), "db_type"),
             version=_ensure_str(data.get("version"), "version"),
             port=_ensure_str(data.get("port"), "port"),
@@ -94,6 +96,7 @@ class EnvSpec:
     """
 
     project_name: str
+    cve_id: str
     db_type: str
     version: str
     objective: str
@@ -105,6 +108,7 @@ class EnvSpec:
     def from_dict(cls, data: dict[str, Any]) -> "EnvSpec":
         return cls(
             project_name=_ensure_str(data.get("project_name"), "project_name"),
+            cve_id=_ensure_str(data.get("cve_id"), "cve_id"),
             db_type=_ensure_str(data.get("db_type"), "db_type"),
             version=_ensure_str(data.get("version"), "version"),
             objective=_ensure_str(data.get("objective"), "objective"),
@@ -144,6 +148,7 @@ class ProjectArtifacts:
     """generator agent 输出的完整项目文件集合。"""
 
     project_name: str
+    cve_id: str
     files: list[GeneratedFile]
     run_instructions: list[str]
     summary: str
@@ -155,6 +160,7 @@ class ProjectArtifacts:
             raise ValueError("files must be a list.")
         return cls(
             project_name=_ensure_str(data.get("project_name"), "project_name"),
+            cve_id=_ensure_str(data.get("cve_id"), "cve_id"),
             files=[GeneratedFile.from_dict(item) for item in files],
             run_instructions=_ensure_list_of_str(
                 data.get("run_instructions"), "run_instructions"
@@ -165,6 +171,7 @@ class ProjectArtifacts:
     def to_dict(self) -> dict[str, Any]:
         return {
             "project_name": self.project_name,
+            "cve_id": self.cve_id,
             "files": [file.to_dict() for file in self.files],
             "run_instructions": self.run_instructions,
             "summary": self.summary,
@@ -176,7 +183,7 @@ class ValidationReport:
     """validator agent 输出的校验结果。
 
     `repair_instructions` 用来承接“可自动修复”的问题说明。
-    当前修复动作已经并入 validator 模块内部，而不再由独立 repair agent 负责。
+    当前修复动作已经并入 validator 模块内部，而不再由独立的修复阶段负责。
     """
 
     passed: bool

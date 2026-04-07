@@ -94,12 +94,12 @@
   - `assumptions`
 4. 使用 `EnvSpec.from_dict()` 转成结构化对象
 
-它的目标是把“这次项目应该长什么样”先规划清楚，再交给 writer 执行。
+它的目标是把“这次项目应该长什么样”先规划清楚，再交给 generator 执行。
 
 ### 3. Generator Agent
 
 位置：[generator.py](/home/wjh/db-env-gc/agent/generator.py)  
-提示词：[prompts/writer.md](/home/wjh/db-env-gc/agent/prompts/writer.md)
+提示词：[prompts/generator.md](/home/wjh/db-env-gc/agent/prompts/generator.md)
 
 作用：
 

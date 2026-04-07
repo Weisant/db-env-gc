@@ -25,5 +25,6 @@ def build_env_spec(task: TaskInput, client: JsonChatClient) -> EnvSpec:
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         temperature=0.1,
+        model=client.settings.planner_model,
     )
     return EnvSpec.from_dict(response)
