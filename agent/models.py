@@ -45,6 +45,15 @@ def _ensure_list_of_str(value: Any, field_name: str) -> list[str]:
     return [str(item).strip() for item in value if str(item).strip()]
 
 
+def _ensure_bool(value: Any, field_name: str, default: bool = False) -> bool:
+    """把任意值规范成布尔值。"""
+    if value is None:
+        return default
+    if not isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a boolean.")
+    return value
+
+
 @dataclass
 class TaskInput:
     """标准化后的用户输入。
@@ -100,6 +109,9 @@ class EnvSpec:
     db_type: str
     version: str
     objective: str
+    image_strategy: str
+    image_ref: str
+    requires_dockerfile: bool
     suggested_files: list[str]
     constraints: list[str]
     assumptions: list[str]
@@ -112,6 +124,11 @@ class EnvSpec:
             db_type=_ensure_str(data.get("db_type"), "db_type"),
             version=_ensure_str(data.get("version"), "version"),
             objective=_ensure_str(data.get("objective"), "objective"),
+            image_strategy=_ensure_str(data.get("image_strategy"), "image_strategy"),
+            image_ref=_ensure_str(data.get("image_ref"), "image_ref"),
+            requires_dockerfile=_ensure_bool(
+                data.get("requires_dockerfile"), "requires_dockerfile"
+            ),
             suggested_files=_ensure_list_of_str(
                 data.get("suggested_files"), "suggested_files"
             ),
@@ -210,11 +227,99 @@ class ValidationReport:
 
 
 @dataclass
+class VersionResolution:
+    """数据库版本来源解析结果。
+
+    这个对象由 tools 层基于项目内置的官方源码源规则得到，
+    用来判断“请求的数据库版本本身是否真实存在”。
+    """
+
+    db_type: str
+    requested_version: str
+    source_name: str
+    source_url: str
+    version_exists: bool
+    matched_version: str
+    matched_url: str
+    lookup_strategy: str
+    availability: str
+    checked_sources: list[str]
+    checked_candidates: list[str]
+    notes: list[str]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "VersionResolution":
+        return cls(
+            db_type=_ensure_str(data.get("db_type"), "db_type"),
+            requested_version=_ensure_str(data.get("requested_version"), "requested_version"),
+            source_name=_ensure_str(data.get("source_name"), "source_name"),
+            source_url=_ensure_str(data.get("source_url"), "source_url"),
+            version_exists=_ensure_bool(data.get("version_exists"), "version_exists"),
+            matched_version=_ensure_str(data.get("matched_version"), "matched_version"),
+            matched_url=_ensure_str(data.get("matched_url"), "matched_url"),
+            lookup_strategy=_ensure_str(data.get("lookup_strategy"), "lookup_strategy"),
+            availability=_ensure_str(data.get("availability"), "availability"),
+            checked_sources=_ensure_list_of_str(
+                data.get("checked_sources"), "checked_sources"
+            ),
+            checked_candidates=_ensure_list_of_str(
+                data.get("checked_candidates"), "checked_candidates"
+            ),
+            notes=_ensure_list_of_str(data.get("notes"), "notes"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class ImageResolution:
+    """镜像来源解析结果。
+
+    这个对象由 tools 层基于 Docker Hub 查询得到，
+    供 planner / generator / validator 决定应走 `image:` 还是 `Dockerfile` 分支。
+    """
+
+    db_type: str
+    requested_version: str
+    namespace: str
+    repository: str
+    matched_tag: str
+    image_ref: str
+    strategy: str
+    availability: str
+    checked_candidates: list[str]
+    notes: list[str]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ImageResolution":
+        return cls(
+            db_type=_ensure_str(data.get("db_type"), "db_type"),
+            requested_version=_ensure_str(data.get("requested_version"), "requested_version"),
+            namespace=_ensure_str(data.get("namespace"), "namespace"),
+            repository=_ensure_str(data.get("repository"), "repository"),
+            matched_tag=_ensure_str(data.get("matched_tag"), "matched_tag"),
+            image_ref=_ensure_str(data.get("image_ref"), "image_ref"),
+            strategy=_ensure_str(data.get("strategy"), "strategy"),
+            availability=_ensure_str(data.get("availability"), "availability"),
+            checked_candidates=_ensure_list_of_str(
+                data.get("checked_candidates"), "checked_candidates"
+            ),
+            notes=_ensure_list_of_str(data.get("notes"), "notes"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class PipelineResult:
     """一次完整运行的汇总结果。"""
 
     run_dir: Path
     task: TaskInput
+    version_resolution: VersionResolution
+    image_resolution: ImageResolution
     env_spec: EnvSpec
     artifacts: ProjectArtifacts
     validation: ValidationReport
@@ -223,6 +328,8 @@ class PipelineResult:
         return {
             "run_dir": str(self.run_dir),
             "task": self.task.to_dict(),
+            "version_resolution": self.version_resolution.to_dict(),
+            "image_resolution": self.image_resolution.to_dict(),
             "env_spec": self.env_spec.to_dict(),
             "artifacts": self.artifacts.to_dict(),
             "validation": self.validation.to_dict(),

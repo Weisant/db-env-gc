@@ -31,6 +31,9 @@
 - 优先修复 `findings` 中的关键问题
 - 如果 `cve_id` 非空，修复后项目名必须继续符合 `CVE编号-数据库名称-版本号`
 - 如果 `cve_id` 为空，修复后项目名必须继续符合 `数据库名称-版本号-env`
+- 必须继续遵守输入中的镜像策略；不要把 `official_image` 和 `custom_dockerfile` 两种分支互相改写
+- 如果镜像策略为 `official_image`，修复后 `docker-compose.yml` 必须继续使用给定的 `image_ref`
+- 如果镜像策略为 `custom_dockerfile`，修复后必须保留或补齐 `Dockerfile`，并确保 compose 使用 `build:`
 - 不要为了轻微排版或措辞问题重写文件
 - 修复后项目应继续符合原始任务和环境规划
 - 如果 README 中包含命令示例，请使用标准 Markdown fenced code block

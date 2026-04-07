@@ -2,7 +2,7 @@
 
 generator 的职责非常单一：
 只生成“文件内容本身”，不负责写盘。
-真正的写文件动作会交给 `agent/tools` 目录下的工具层完成。
+真正的写文件动作会交给项目根目录下的 `tools/` 工具层完成。
 """
 
 from __future__ import annotations
@@ -10,12 +10,13 @@ from __future__ import annotations
 import json
 
 from agent.llm import JsonChatClient
-from agent.models import ProjectArtifacts, TaskInput, EnvSpec
+from agent.models import EnvSpec, ImageResolution, ProjectArtifacts, TaskInput
 from agent.prompt_loader import load_prompt
 
 
 def generate_project(
     task: TaskInput,
+    image_resolution: ImageResolution,
     env_spec: EnvSpec,
     client: JsonChatClient,
 ) -> ProjectArtifacts:
@@ -27,6 +28,8 @@ def generate_project(
         "请根据下面的信息生成完整 Docker 项目文件集合 JSON。\n\n"
         "标准化任务：\n"
         f"{json.dumps(task.to_dict(), ensure_ascii=False, indent=2)}\n\n"
+        "镜像解析结果：\n"
+        f"{json.dumps(image_resolution.to_dict(), ensure_ascii=False, indent=2)}\n\n"
         "环境规划：\n"
         f"{json.dumps(env_spec.to_dict(), ensure_ascii=False, indent=2)}"
     )

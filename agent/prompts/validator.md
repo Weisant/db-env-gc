@@ -21,7 +21,9 @@
 - 如果 `cve_id` 非空，项目名是否符合 `CVE编号-数据库名称-版本号`
 - 如果 `cve_id` 为空，项目名是否符合 `数据库名称-版本号-env`
 - 项目名是否与任务中的 `cve_id`、`db_type`、`version` 一致
-- `docker-compose.yml` 是否具备基本可运行结构，如 `services`、`image`、`ports`
+- 如果镜像策略为 `official_image`，`docker-compose.yml` 是否使用了输入给定的 `image_ref`
+- 如果镜像策略为 `custom_dockerfile`，是否存在 `Dockerfile`，且 `docker-compose.yml` 是否使用 `build:`
+- `docker-compose.yml` 是否具备基本可运行结构，如 `services`、`ports`
 - 任务要求中的数据库类型、版本、端口、用户、数据库名、关键配置项是否和文件内容一致
 - 如果生成了 `config/` 或 `init/` 文件，路径和 README 说明是否自洽
 - README 是否说明启动方式、目录结构、关键配置

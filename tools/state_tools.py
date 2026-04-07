@@ -9,13 +9,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from agent.models import EnvSpec, ProjectArtifacts, TaskInput, ValidationReport
-from agent.tools.file_tools import ensure_directory, write_file
+from agent.models import EnvSpec, ImageResolution, ProjectArtifacts, TaskInput, ValidationReport, VersionResolution
+from tools.file_tools import ensure_directory, write_file
 
 
 def write_pipeline_state(
     run_dir: Path,
     task: TaskInput,
+    version_resolution: VersionResolution,
+    image_resolution: ImageResolution,
     env_spec: EnvSpec,
     artifacts: ProjectArtifacts,
     validation: ValidationReport,
@@ -26,6 +28,8 @@ def write_pipeline_state(
 
     state_payloads = {
         "task.json": task.to_dict(),
+        "version_resolution.json": version_resolution.to_dict(),
+        "image_resolution.json": image_resolution.to_dict(),
         "env_spec.json": env_spec.to_dict(),
         "artifacts.json": artifacts.to_dict(),
         "validation.json": validation.to_dict(),

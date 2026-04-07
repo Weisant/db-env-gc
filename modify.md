@@ -1,338 +1,281 @@
-# `0.2` 相对 `0.1` 的版本说明
+# `0.3` 相对 `0.2` 的版本说明
 
-本文档用于说明当前版本相对于 Git tag `0.1` 的主要修改内容，方便后续继续迭代、打 tag 和回溯设计变化。
+本文档用于说明当前版本相对于 Git tag `0.2` 的主要修改内容，方便后续继续迭代、打 tag 和回溯设计变化。
 
 ## 一、版本定位
 
-`0.1` 的重点是把系统从“多角色混合实现”收敛成一条更清晰的工作流：
+`0.2` 的重点是把原有流水线变得更可控、更可观测：
 
-- 保留 `parser / planner / generator / validator`
-- 把文件写入与状态落盘下沉到 `agent/tools`
-- 让 validator 基于真实磁盘快照而不是内存对象做检查
+- 支持按阶段配置模型
+- 收紧 validator 自动修复触发条件
+- 修正阶段耗时与总耗时统计
+- 强化 `cve_id`、项目命名和输入结构的一致性
 
-`0.2` 在这个基础上，重点做的是：
+`0.3` 在这个基础上，重点解决的是：
 
-- 让模型调用更可控
-- 让自动修复更克制
-- 让终端运行信息更准确
-- 让项目命名规则更稳定
-- 让输入结构更适配真实使用场景
+- 让工具层真正独立于 `agent/`
+- 在生成前先判断数据库版本是否真实存在
+- 在生成前再判断官方镜像是否真实可用
+- 让“走官方镜像”还是“走 Dockerfile”不再由 LLM 临场猜测
 
-## 二、相对 `0.1` 的主要变化
+## 二、相对 `0.2` 的主要变化
 
-### 1. 新增多模型配置能力
+### 1. `tools/` 从 `agent/` 目录彻底上移为项目级共享层
 
-`0.1` 默认所有阶段共用同一个模型配置。
+`0.2` 虽然在语义上已经把 tools 当成独立执行层使用，但物理目录仍然位于 `agent/tools/`。
 
-`0.2` 新增了按阶段配置模型的能力，支持：
+`0.3` 做了正式拆分：
 
-- `DEFAULT_MODEL`
-- `PARSER_MODEL`
-- `PLANNER_MODEL`
-- `GENERATOR_MODEL`
-- `VALIDATOR_MODEL`
+- 删除 `agent/tools/`
+- 在项目根目录新增 `tools/`
+- 统一由主调度器、validator 和状态写盘逻辑直接引用根级 `tools/`
 
-如果某个阶段没有单独配置，会自动回退到 `DEFAULT_MODEL`。  
-同时保留了对旧字段 `MODEL_NAME` 的兼容，避免旧环境变量立刻失效。
+这样做的意义是：
 
-这项改动的目标是：
-
-- parser 和 validator 可以优先使用更快的模型
-- generator 可以单独使用更强的模型
-- 后续更容易按成本、速度、效果做分层配置
-
-对应修改文件：
-
-- `agent/config.py`
-- `agent/llm.py`
-- `agent/parser.py`
-- `agent/planner.py`
-- `agent/generator.py`
-- `agent/validator.py`
-- `agent/.env.example`
-
-### 2. 自动修复触发策略被收紧
-
-`0.1` 中，validator 只要发现 `findings` 或 `repair_instructions`，通常就会进入修复闭环。
-
-`0.2` 增加了“结构性问题才自动修复”的判定逻辑：
-
-- `warnings` 只报告，不自动修
-- README 排版、Markdown 代码块、措辞、轻微格式问题只报告，不自动修
-- 缺文件、关键配置不一致、`docker-compose.yml` 结构不完整、端口/镜像/初始化文件问题这类结构性问题才自动修
-
-这样做的好处是：
-
-- 减少额外的大模型调用次数
-- 减少为了轻微问题反复重写项目文件
-- 让 validator 更像“交付质量把关”，而不是“任何问题都立刻重生成”
-
-对应修改文件：
-
-- `agent/validator.py`
-- `agent/prompts/validator.md`
-- `agent/prompts/validator_repair.md`
-
-### 3. prompt 整体压缩
-
-`0.1` 的 prompt 已经能工作，但整体偏长，很多约束描述存在重复。
-
-`0.2` 对 prompt 做了压缩，原则是：
-
-- 保留必要的边界和输出格式要求
-- 删除重复表述
-- 让 parser / planner / generator / validator 的职责边界更直接
-
-这项改动的目标不是改功能，而是：
-
-- 减少上下文体积
-- 降低单次调用耗时
-- 让模型更聚焦当前阶段任务
-
-对应修改文件：
-
-- `agent/prompts/parser.md`
-- `agent/prompts/planner.md`
-- `agent/prompts/generator.md`
-- `agent/prompts/validator.md`
-- `agent/prompts/validator_repair.md`
-
-### 4. 新增阶段计时，并修正总耗时起点
-
-`0.1` 的总耗时是从 `main.py` 启动就开始计算的，这会把“用户还没输入任务”的等待时间也算进去。
-
-`0.2` 做了两件事：
-
-- 每个阶段单独计时，在终端输出 `Step Duration`
-- 总耗时改为从“用户提交任务内容之后”开始计算
-
-这样可以更准确地区分：
-
-- 是用户输入慢
-- 还是 parser / planner / generator / validator 某个阶段真的慢
-
-对应修改文件：
-
-- `main.py`
-- `agent/agent.py`
-
-### 5. 终端提示从“当前 Agent”改成“当前阶段执行方”
-
-`0.1` 的终端输出里使用了：
-
-- `当前 Agent：parser`
-- `当前 Agent：validator + tools`
-
-这个说法在单一角色阶段没问题，但在 `validator + tools` 这种组合阶段里不够准确，因为它并不是单独一个 agent。
-
-`0.2` 改成了：
-
-- `当前阶段执行方：parser`
-- `当前阶段执行方：validator + tools`
-
-这样更符合当前架构，也减少了概念混淆。
+- 目录结构更能反映真实架构分层
+- `agent/` 更聚焦“理解、规划、生成、校验”
+- `tools/` 更明确承担“确定性辅助步骤 + 文件系统执行”
 
 对应修改文件：
 
 - `agent/agent.py`
+- `agent/validator.py`
+- `tools/__init__.py`
+- `tools/file_tools.py`
+- `tools/project_tools.py`
+- `tools/state_tools.py`
+- `README.md`
+- `agent/README.md`
 
-### 6. 新增 `cve_id` 结构化字段
+### 2. 新增“版本真实性校验”前置步骤
 
-`0.1` 里虽然已经开始讨论“项目目录名最好带上 CVE 编号”，但这只是 prompt 层的约束，不是正式的数据字段。
+`0.2` 还默认认为：只要用户给了数据库类型和版本，就可以继续生成环境。
 
-`0.2` 把 `cve_id` 正式加入到了结构化链路中：
+`0.3` 新增了 `VersionResolution` 和 `tools/version_source_tools.py`：
 
-- `TaskInput`
-- `EnvSpec`
-- `ProjectArtifacts`
+- 在生成前先根据项目内置的官方源码源规则检查版本是否真实存在
+- 如果版本没有在可信来源中确认存在，主流程会直接 fail fast
+- 不再为“根本不存在的版本”继续生成看似合理但实际错误的环境
 
-这样带来的收益是：
+当前版本已经内置了部分数据库的官方源码源规则，例如：
 
-- parser 不再需要把 CVE 编号塞进自由文本或注释里
-- planner / generator 可以稳定使用同一个字段
-- validator 也可以正式检查项目命名是否一致
+- Redis 官方下载源
+- PostgreSQL 官方源码归档
+- MySQL 官方 GitHub 源码 tag
+- MongoDB 官方 GitHub 源码 tag
 
 对应修改文件：
 
 - `agent/models.py`
 - `agent/agent.py`
-- `agent/prompts/parser.md`
-- `agent/prompts/planner.md`
-- `agent/prompts/generator.md`
-- `agent/prompts/validator.md`
-- `agent/prompts/validator_repair.md`
+- `tools/version_source_tools.py`
+- `tools/state_tools.py`
+- `README.md`
+- `agent/README.md`
 
-### 7. 项目命名规则升级为“双模式”
+### 3. 新增“官方镜像可用性判断”前置步骤
 
-围绕 `cve_id`，`0.2` 还完善了项目命名规则。
+`0.2` 中，generator 仍然倾向于直接生成使用官方镜像的 compose 文件。
 
-现在命名规则分两种情况：
+`0.3` 新增了 `ImageResolution` 和 `tools/registry_tools.py`：
 
-1. 用户提供了 `cve_id`
-   项目名使用：
-   `CVE编号-数据库名称-版本号`
+- 在 planner / generator 之前先查询 Docker Hub 官方镜像和精确 tag 是否存在
+- 如果官方精确 tag 存在，后续阶段必须走 `official_image`
+- 如果版本存在但官方镜像 tag 不存在，后续阶段必须走 `custom_dockerfile`
 
-   例如：
-   `CVE-2021-44228-postgres-13`
-
-2. 用户没有提供 `cve_id`
-   项目名自动降级为：
-   `数据库名称-版本号-env`
-
-   例如：
-   `postgres-13-env`
-
-这套规则的意义在于：
-
-- 不会为了命名规则强迫用户必须提供 CVE
-- 也不会在没有 CVE 时让模型乱猜一个编号
-- 让命名逻辑在“有漏洞编号”和“无漏洞编号”两种场景下都可用
+也就是说，镜像策略从“模型生成时的隐式判断”变成了“工具层前置决策”。
 
 对应修改文件：
 
-- `agent/prompts/parser.md`
-- `agent/prompts/planner.md`
-- `agent/prompts/generator.md`
-- `agent/prompts/validator.md`
-- `agent/prompts/validator_repair.md`
+- `agent/models.py`
 - `agent/agent.py`
+- `agent/planner.py`
+- `agent/generator.py`
+- `agent/validator.py`
+- `tools/registry_tools.py`
+- `tools/state_tools.py`
 
-### 8. `db_type` 不再被限制为固定四类数据库
+### 4. 主流水线升级为“双解析 + LLM 规划生成”
 
-`0.1` 早期 prompt 里还保留着：
+相对 `0.2`，主链路已经从：
 
-- `postgres`
-- `mysql`
-- `redis`
-- `mongodb`
+`parser -> planner -> generator -> tools写盘 -> validator -> tools写状态`
 
-这类固定枚举式写法。
+变成：
 
-`0.2` 把这部分放开了：
+`parser -> version_source_tools -> registry_tools -> planner -> generator -> tools写盘 -> validator -> tools写状态`
 
-- `db_type` 现在表示“数据库名称本身”
-- 不再限制为固定四类
-- parser prompt 明确要求不要把数据库类型限制死
+这意味着：
 
-这样更适合后续扩展到更多数据库或数据库变体场景。
+- LLM 不再承担“数据库版本真实性判断”
+- LLM 不再承担“官方镜像是否存在”的判断
+- planner / generator 接到的是已经收口的结构化前置信息
 
-对应修改文件：
+这样能明显降低：
 
-- `agent/prompts/parser.md`
-
-### 9. 新增 CLI 可选参数控制是否启用 validator
-
-`0.2` 现在支持通过命令行参数决定是否执行 validator 阶段。
-
-默认情况下：
-
-- 会执行 validator
-- 会基于真实磁盘快照做检查
-- 在必要时触发内部修复
-
-如果用户希望“只生成项目、先不校验”，现在可以使用：
-
-```bash
-python3 main.py --skip-validator
-```
-
-启用这个参数后：
-
-- 主流程会跳过 validator 调用
-- tools 仍然会正常写入项目文件
-- 系统仍会写出结构化 `validation.json`
-- 其中会明确记录“本次运行跳过了 validator 阶段”
-
-这样做的意义是：
-
-- 适合快速生成项目草稿
-- 能减少一轮或多轮 LLM 调用
-- 让用户可以自己决定是否需要自动校验与自动修复
+- 因外部事实不准导致的生成漂移
+- 因镜像或源码不存在导致的无效产物
 
 对应修改文件：
 
-- `main.py`
 - `agent/agent.py`
+- `agent/planner.py`
+- `agent/generator.py`
+- `agent/validator.py`
+
+### 5. 结构化状态模型进一步扩展
+
+`0.3` 增加了新的结构化对象：
+
+- `VersionResolution`
+- `ImageResolution`
+
+同时扩展了：
+
+- `EnvSpec`
+- `PipelineResult`
+
+其中：
+
+- `EnvSpec` 现在显式携带 `image_strategy`、`image_ref`、`requires_dockerfile`
+- `PipelineResult` 会同时汇总任务输入、版本解析、镜像解析、环境规划、生成产物和校验结果
+
+这让整个流水线在状态回溯时更完整，也更容易调试错误来源。
+
+对应修改文件：
+
+- `agent/models.py`
+
+### 6. `state/` 目录新增前置解析结果落盘
+
+`0.2` 的状态文件主要覆盖：
+
+- `task.json`
+- `env_spec.json`
+- `artifacts.json`
+- `validation.json`
+
+`0.3` 进一步新增：
+
+- `state/version_resolution.json`
+- `state/image_resolution.json`
+
+这样后续排查时，可以直接看到：
+
+- 本次版本真实性校验依据了哪些官方来源
+- 本次是否命中官方镜像 tag
+- 为什么最终走的是 `image:` 还是 `Dockerfile`
+
+对应修改文件：
+
+- `tools/state_tools.py`
 - `README.md`
 
-### 10. 默认输出目录改为“当前项目根目录下的 output/”
+### 7. prompt 和 validator 规则同步升级
 
-在早期实现里，默认输出目录写死为固定绝对路径。
+`0.3` 对 prompt 做的重点，不是继续加长，而是让它们显式遵守工具层决策：
 
-`0.2` 现在改成：
+- planner 必须根据 `ImageResolution` 决定是否要求 `Dockerfile`
+- generator 必须根据镜像策略输出 `image:` 或 `build:`
+- validator 必须根据镜像策略检查 compose 和 `Dockerfile` 是否自洽
+- validator repair 也必须继续遵守镜像策略，不能把两种分支互相改写
 
-- 如果用户在 CLI 里显式传入输出路径，就使用用户提供的路径
-- 如果用户没有传入路径，就默认使用“当前项目根目录下的 `output/`”
+这意味着：
 
-也就是说，默认行为变成了“随项目目录位置自动变化”，而不是依赖某个写死的绝对路径。
-
-这项改动的好处是：
-
-- 项目被移动到其他目录后，默认输出路径依然正确
-- 不再依赖开发机上的固定目录结构
-- 更适合作为可迁移的项目使用
+- prompt 的职责边界更清晰
+- 后续模型输出更不容易与外部事实冲突
 
 对应修改文件：
 
-- `main.py`
+- `agent/prompts/planner.md`
+- `agent/prompts/generator.md`
+- `agent/prompts/validator.md`
+- `agent/prompts/validator_repair.md`
+
+### 8. Docker Hub 与版本源查询增加网络回退策略
+
+在真实环境中，直接使用 Python `urllib` 查询外部服务会遇到 TLS 或代理兼容问题。
+
+`0.3` 针对这一点加入了更稳的兜底：
+
+- 优先使用标准 Python 网络请求
+- 如果遇到兼容性问题，再回退到 `curl`
+
+这样做的收益是：
+
+- 工具层在受限网络环境里更稳
+- 真实线上验证更容易通过
+- 失败时仍能以结构化状态返回，而不是让主流程莫名中断
+
+对应修改文件：
+
+- `tools/registry_tools.py`
+- `tools/version_source_tools.py`
 
 ## 三、关键文件变化
 
 ### 本次重点修改文件
 
-- `main.py`
+- `pyproject.toml`
+- `README.md`
+- `modify.md`
+- `agent/README.md`
 - `agent/agent.py`
-- `agent/config.py`
-- `agent/llm.py`
 - `agent/models.py`
-- `agent/parser.py`
 - `agent/planner.py`
 - `agent/generator.py`
 - `agent/validator.py`
-- `agent/.env.example`
-- `agent/prompts/parser.md`
 - `agent/prompts/planner.md`
 - `agent/prompts/generator.md`
 - `agent/prompts/validator.md`
 - `agent/prompts/validator_repair.md`
-- `modify.md`
+- `tools/__init__.py`
+- `tools/file_tools.py`
+- `tools/project_tools.py`
+- `tools/state_tools.py`
+- `tools/registry_tools.py`
+- `tools/version_source_tools.py`
 
-### 本次没有新增新的业务模块
+### 本次新增的新业务模块
 
-`0.2` 没有继续拆新的 agent 或 tools 模块，重点是增强现有模块的可控性与一致性，而不是继续扩展架构复杂度。
+- `tools/registry_tools.py`
+- `tools/version_source_tools.py`
 
-## 四、`0.2` 的直接收益
+### 本次移除的旧目录结构
 
-相对 `0.1`，当前版本的直接收益主要有：
+- `agent/tools/`
 
-- 模型配置更灵活，可以按阶段分配不同模型
-- 自动修复次数减少，整体运行成本和耗时更可控
-- 终端里可以直接看到每个阶段耗时
-- 总耗时统计更准确，不再混入等待用户输入的时间
-- `cve_id` 成为正式字段，不再只是 prompt 里的隐含规则
-- 项目命名规则更稳定，并支持无 CVE 场景自动降级
-- `db_type` 不再被固定在早期支持的少数数据库上
+## 四、`0.3` 的直接收益
+
+相对 `0.2`，当前版本的直接收益主要有：
+
+- tools 层不再挂在 `agent/` 下，项目分层更清楚
+- 不再为不存在的数据库版本继续生成无效环境
+- 不再把官方镜像可用性判断留给 LLM 自由发挥
+- `Dockerfile` 分支和 `image:` 分支的切换依据更明确
+- `state/` 目录可以完整回溯“为什么这样生成”
+- 文档、主流程和结构化状态模型的一致性更强
 
 ## 五、当前版本仍然存在的已知问题
 
-虽然 `0.2` 明显比 `0.1` 更稳，但仍然有一些已知问题需要后续继续优化：
+虽然 `0.3` 相比 `0.2` 又前进了一步，但当前版本仍有一些已知限制：
 
-- 生成质量仍然高度依赖 prompt 和模型本身
-- validator 的“结构性问题判定”目前仍是启发式关键词判断，还不是严格规则系统
-- README 和说明文档的质量仍可能波动
-- 尚未加入更细粒度的本地预检查，因此 validator 仍然会消耗一轮 LLM 调用
+- 版本源目录目前只覆盖少量高频数据库，还没有覆盖所有数据库或数据库变体
+- 特殊漏洞场景仍未形成正式的 `CVE` 上下文覆盖层
+- Dockerfile 内容仍然依赖 generator 生成，当前阶段还没有收敛为模板化构建策略
+- 工具层虽然能判断“版本是否存在 / 镜像是否存在”，但还不能理解“发行版包漏洞”“模块漏洞”“构建选项漏洞”这类特殊场景
 
-也就是说，`0.2` 主要优化的是：
+也就是说，`0.3` 主要解决的是：
 
-- 配置能力
-- 命名一致性
-- 自动修复策略
-- 运行可观测性
+- 工具层分层
+- 外部事实前置校验
+- 流水线输入可信度
+- 环境生成分支决策
 
-而不是把最终生成质量问题一次性彻底解决。
+而不是一次性解决所有漏洞上下文建模问题。
 
 ## 六、一句话总结
 
-相对 `0.1`，`0.2` 的本质变化是：
+相对 `0.2`，`0.3` 的本质变化是：
 
-**让系统从“能跑通”进一步变成“更可控、更可观测、命名更稳定、对真实输入场景更友好”的版本。**
+**让系统从“基于用户输入直接生成环境”进一步升级为“先用工具确认版本和镜像事实，再由 LLM 在受约束的前提下生成环境”的版本。**

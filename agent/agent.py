@@ -8,7 +8,7 @@
 注意：
 - generator 只负责生成内容，不写文件
 - validator 会在必要时自动修复项目
-- tools 目录只负责文件系统操作，不参与内容生成
+- tools 负责确定性辅助步骤和文件系统操作，不参与内容生成
 """
 
 from __future__ import annotations
@@ -23,11 +23,26 @@ from typing import Any
 from agent.config import load_settings
 from agent.generator import generate_project
 from agent.llm import JsonChatClient
-from agent.models import EnvSpec, PipelineResult, ProjectArtifacts, TaskInput, ValidationReport
+from agent.models import (
+    EnvSpec,
+    ImageResolution,
+    PipelineResult,
+    ProjectArtifacts,
+    TaskInput,
+    ValidationReport,
+    VersionResolution,
+)
 from agent.parser import parse_task
 from agent.planner import build_env_spec
-from agent.tools import create_run_directory, read_project_snapshot, write_pipeline_state, write_project
 from agent.validator import validate_project
+from tools import (
+    create_run_directory,
+    read_project_snapshot,
+    resolve_image_source,
+    resolve_version_source,
+    write_pipeline_state,
+    write_project,
+)
 
 
 @dataclass
@@ -61,7 +76,7 @@ class DBEnvGenerationAgent:
         """执行完整流水线。
 
         当前版本的主链路为：
-        parser -> planner -> generator -> tools写盘 -> validator(可选，含自动修复) -> tools写状态
+        parser -> version-source-tools -> image-resolution-tools -> planner -> generator -> tools写盘 -> validator(可选，含自动修复) -> tools写状态
         """
         plan = self.create_plan()
         print("\n" + "=" * 72)
@@ -71,6 +86,8 @@ class DBEnvGenerationAgent:
             print(f"{index}. {step}")
 
         task: TaskInput | None = None
+        version_resolution: VersionResolution | None = None
+        image_resolution: ImageResolution | None = None
         env_spec: EnvSpec | None = None
         artifacts: ProjectArtifacts | None = None
         validation: ValidationReport | None = None
@@ -101,22 +118,55 @@ class DBEnvGenerationAgent:
                 self.log_agent_payload("parser", task.to_dict())
             elif index == 2:
                 assert task is not None
-                env_spec = build_env_spec(task, self.client)
+                version_resolution = resolve_version_source(task)
                 outcome = StepOutcome(
-                    thought="parser 已经给出稳定输入，接下来由 planner 明确项目结构和约束。",
-                    action="build_env_spec(task, client)",
+                    thought="先用项目内置的官方源码源规则确认数据库版本是否真实存在，避免为不存在的版本继续生成环境。",
+                    action="resolve_version_source(task)",
+                    observation=json.dumps(version_resolution.to_dict(), ensure_ascii=False, indent=2),
+                    result=(
+                        f"版本存在性状态为 {version_resolution.availability}。"
+                        f"{' 已确认版本存在。' if version_resolution.version_exists else ' 当前版本未通过真实性校验。'}"
+                    ),
+                    duration_seconds=round(time.time() - step_start_time, 2),
+                )
+                self.log_agent_payload("tools:version_resolution", version_resolution.to_dict())
+            elif index == 3:
+                assert task is not None
+                assert version_resolution is not None
+                image_resolution = resolve_image_source(task)
+                outcome = StepOutcome(
+                    thought="先确认 Docker Hub 上是否存在目标官方镜像 tag，再决定后续应走 image 还是 Dockerfile 分支。",
+                    action="resolve_image_source(task)",
+                    observation=json.dumps(image_resolution.to_dict(), ensure_ascii=False, indent=2),
+                    result=(
+                        f"镜像策略已确定为 {image_resolution.strategy}，"
+                        f"可用性状态为 {image_resolution.availability}。"
+                    ),
+                    duration_seconds=round(time.time() - step_start_time, 2),
+                )
+                self.log_agent_payload("tools:image_resolution", image_resolution.to_dict())
+            elif index == 4:
+                assert task is not None
+                assert version_resolution is not None
+                assert image_resolution is not None
+                env_spec = build_env_spec(task, image_resolution, self.client)
+                outcome = StepOutcome(
+                    thought="镜像来源已经确定，接下来由 planner 明确项目结构和约束。",
+                    action="build_env_spec(task, image_resolution, client)",
                     observation=json.dumps(env_spec.to_dict(), ensure_ascii=False, indent=2),
                     result=f"已完成环境规划，项目名为 {env_spec.project_name}。",
                     duration_seconds=round(time.time() - step_start_time, 2),
                 )
                 self.log_agent_payload("planner", env_spec.to_dict())
-            elif index == 3:
+            elif index == 5:
                 assert task is not None
+                assert version_resolution is not None
+                assert image_resolution is not None
                 assert env_spec is not None
-                artifacts = generate_project(task, env_spec, self.client)
+                artifacts = generate_project(task, image_resolution, env_spec, self.client)
                 outcome = StepOutcome(
                     thought="规划已经完成，现在由 generator 直接生成完整文件内容集合。",
-                    action="generate_project(task, env_spec, client)",
+                    action="generate_project(task, image_resolution, env_spec, client)",
                     observation=json.dumps(
                         {
                             "cve_id": artifacts.cve_id,
@@ -130,8 +180,10 @@ class DBEnvGenerationAgent:
                     duration_seconds=round(time.time() - step_start_time, 2),
                 )
                 self.log_agent_payload("generator", artifacts.to_dict())
-            elif index == 4:
+            elif index == 6:
                 assert task is not None
+                assert version_resolution is not None
+                assert image_resolution is not None
                 assert env_spec is not None
                 assert artifacts is not None
 
@@ -143,6 +195,7 @@ class DBEnvGenerationAgent:
                     # validator 读取真实磁盘快照进行检查，并在必要时自动修复。
                     validation, artifacts, repaired = validate_project(
                         task=task,
+                        image_resolution=image_resolution,
                         env_spec=env_spec,
                         artifacts=artifacts,
                         run_dir=run_dir,
@@ -161,7 +214,7 @@ class DBEnvGenerationAgent:
                         thought="先把文件写到真实目录，再由 validator 基于磁盘快照做校验和按需修复。",
                         action=(
                             "create_run_directory(...) -> write_project(...) -> "
-                            "validate_project(task, env_spec, artifacts, run_dir, client)"
+                            "validate_project(task, image_resolution, env_spec, artifacts, run_dir, client)"
                         ),
                         observation=json.dumps(observation, ensure_ascii=False, indent=2),
                         result="校验通过。" if validation.passed else "校验失败。",
@@ -195,6 +248,8 @@ class DBEnvGenerationAgent:
                     self.log_agent_payload("tools", observation)
             else:
                 assert task is not None
+                assert version_resolution is not None
+                assert image_resolution is not None
                 assert env_spec is not None
                 assert artifacts is not None
                 assert validation is not None
@@ -203,6 +258,8 @@ class DBEnvGenerationAgent:
                 state_files = write_pipeline_state(
                     run_dir=run_dir,
                     task=task,
+                    version_resolution=version_resolution,
+                    image_resolution=image_resolution,
                     env_spec=env_spec,
                     artifacts=artifacts,
                     validation=validation,
@@ -210,13 +267,15 @@ class DBEnvGenerationAgent:
                 pipeline_result = PipelineResult(
                     run_dir=run_dir,
                     task=task,
+                    version_resolution=version_resolution,
+                    image_resolution=image_resolution,
                     env_spec=env_spec,
                     artifacts=artifacts,
                     validation=validation,
                 )
                 outcome = StepOutcome(
                     thought="项目文件已经稳定后，再把结构化状态写入 state 目录，方便后续回溯。",
-                    action="write_pipeline_state(run_dir, task, env_spec, artifacts, validation)",
+                    action="write_pipeline_state(run_dir, task, image_resolution, env_spec, artifacts, validation)",
                     observation=json.dumps(
                         {
                             "run_dir": str(run_dir),
@@ -231,6 +290,15 @@ class DBEnvGenerationAgent:
                 self.log_agent_payload("tools", pipeline_result.to_dict())
 
             self._print_outcome(index, outcome)
+            if (
+                index == 2
+                and version_resolution is not None
+                and version_resolution.availability != "version_found"
+            ):
+                raise ValueError(
+                    "未在项目内置的官方源码源中确认该数据库版本存在: "
+                    + "；".join(version_resolution.notes)
+                )
             self._print_remaining_plan(plan[index:])
 
         assert pipeline_result is not None
@@ -245,6 +313,8 @@ class DBEnvGenerationAgent:
         )
         return [
             "解析用户输入并标准化数据库环境需求",
+            "查询官方源码源并确认数据库版本是否真实存在",
+            "查询 Docker Hub 官方镜像可用性并确定镜像策略",
             "生成环境规划，明确要输出的 Docker 项目结构",
             "调用 LLM 生成完整的 Docker 项目文件内容集合",
             step_four,
@@ -263,7 +333,9 @@ class DBEnvGenerationAgent:
             f"已生成 "
             f"{result.task.cve_id + ' 对应的' if result.task.cve_id else ''}"
             f"{result.task.db_type} {result.task.version} Docker 环境项目，"
-            f"输出目录为 {result.run_dir}。主要文件包括 {generated_files}。"
+            f"输出目录为 {result.run_dir}。"
+            f"{' 使用官方镜像 ' + result.image_resolution.image_ref + '。' if result.image_resolution.strategy == 'official_image' else ' 未找到可直接使用的官方精确 tag，已改用 Dockerfile 自定义镜像。'}"
+            f"主要文件包括 {generated_files}。"
             f"{warnings}"
         )
 
@@ -275,10 +347,12 @@ class DBEnvGenerationAgent:
         """
         executor_labels = {
             1: "parser",
-            2: "planner",
-            3: "generator",
-            4: "validator + tools" if self.enable_validator else "tools",
-            5: "tools",
+            2: "tools",
+            3: "tools",
+            4: "planner",
+            5: "generator",
+            6: "validator + tools" if self.enable_validator else "tools",
+            7: "tools",
         }
         return executor_labels.get(step_index, "unknown")
 

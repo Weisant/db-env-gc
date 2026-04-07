@@ -14,13 +14,14 @@ import json
 from pathlib import Path
 
 from agent.llm import JsonChatClient
-from agent.models import EnvSpec, ProjectArtifacts, ProjectSnapshot, TaskInput, ValidationReport
+from agent.models import EnvSpec, ImageResolution, ProjectArtifacts, ProjectSnapshot, TaskInput, ValidationReport
 from agent.prompt_loader import load_prompt
-from agent.tools import overwrite_project_files, read_project_snapshot
+from tools import overwrite_project_files, read_project_snapshot
 
 
 def validate_project(
     task: TaskInput,
+    image_resolution: ImageResolution,
     env_spec: EnvSpec,
     artifacts: ProjectArtifacts,
     run_dir: Path,
@@ -34,7 +35,7 @@ def validate_project(
     3. 本轮是否发生过自动修复
     """
     initial_snapshot = read_project_snapshot(run_dir)
-    initial_report = _run_validation(task, env_spec, initial_snapshot, client)
+    initial_report = _run_validation(task, image_resolution, env_spec, initial_snapshot, client)
 
     # 只有结构性问题才触发自动修复。
     # warnings 和轻微格式问题只保留在报告中，不额外拉起修复调用。
@@ -42,17 +43,25 @@ def validate_project(
     if not should_repair:
         return initial_report, artifacts, False
 
-    repaired_artifacts = _run_repair(task, env_spec, initial_snapshot, initial_report, client)
+    repaired_artifacts = _run_repair(
+        task,
+        image_resolution,
+        env_spec,
+        initial_snapshot,
+        initial_report,
+        client,
+    )
     overwrite_project_files(run_dir, repaired_artifacts.files)
 
     # 修复后重新读取磁盘快照，确保复检看到的是真实最终结果。
     repaired_snapshot = read_project_snapshot(run_dir)
-    final_report = _run_validation(task, env_spec, repaired_snapshot, client)
+    final_report = _run_validation(task, image_resolution, env_spec, repaired_snapshot, client)
     return final_report, repaired_artifacts, True
 
 
 def _run_validation(
     task: TaskInput,
+    image_resolution: ImageResolution,
     env_spec: EnvSpec,
     snapshot: ProjectSnapshot,
     client: JsonChatClient,
@@ -63,6 +72,8 @@ def _run_validation(
         "请检查下面的数据库 Docker 项目是否完整、自洽、可交付。\n\n"
         "标准化任务：\n"
         f"{json.dumps(task.to_dict(), ensure_ascii=False, indent=2)}\n\n"
+        "镜像解析结果：\n"
+        f"{json.dumps(image_resolution.to_dict(), ensure_ascii=False, indent=2)}\n\n"
         "环境规划：\n"
         f"{json.dumps(env_spec.to_dict(), ensure_ascii=False, indent=2)}\n\n"
         "真实磁盘项目快照：\n"
@@ -79,6 +90,7 @@ def _run_validation(
 
 def _run_repair(
     task: TaskInput,
+    image_resolution: ImageResolution,
     env_spec: EnvSpec,
     snapshot: ProjectSnapshot,
     validation: ValidationReport,
@@ -94,6 +106,8 @@ def _run_repair(
         "请根据下面的校验报告修复数据库 Docker 项目，并输出修复后的完整文件集合 JSON。\n\n"
         "标准化任务：\n"
         f"{json.dumps(task.to_dict(), ensure_ascii=False, indent=2)}\n\n"
+        "镜像解析结果：\n"
+        f"{json.dumps(image_resolution.to_dict(), ensure_ascii=False, indent=2)}\n\n"
         "环境规划：\n"
         f"{json.dumps(env_spec.to_dict(), ensure_ascii=False, indent=2)}\n\n"
         "真实磁盘项目快照：\n"
@@ -131,6 +145,8 @@ def should_auto_repair(validation: ValidationReport) -> bool:
         "不一致",
         "services",
         "image",
+        "build",
+        "dockerfile",
         "ports",
         "docker-compose",
         "端口",
