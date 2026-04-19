@@ -9,15 +9,30 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from agent.models import EnvSpec, ImageResolution, ProjectArtifacts, TaskInput, ValidationReport, VersionResolution
+from agent.models import (
+    ArtifactFact,
+    ArtifactPlan,
+    EnvSpec,
+    EvidenceItem,
+    FinalVersionDecision,
+    ProjectArtifacts,
+    ReproductionProfile,
+    ResolvedTask,
+    TaskInput,
+    ValidationReport,
+)
 from tools.file_tools import ensure_directory, write_file
 
 
 def write_pipeline_state(
     run_dir: Path,
     task: TaskInput,
-    version_resolution: VersionResolution,
-    image_resolution: ImageResolution,
+    resolved_task: ResolvedTask,
+    final_version_decision: FinalVersionDecision,
+    evidence: list[EvidenceItem],
+    reproduction_profile: ReproductionProfile,
+    artifact_facts: list[ArtifactFact],
+    artifact_plan: ArtifactPlan,
     env_spec: EnvSpec,
     artifacts: ProjectArtifacts,
     validation: ValidationReport,
@@ -28,8 +43,12 @@ def write_pipeline_state(
 
     state_payloads = {
         "task.json": task.to_dict(),
-        "version_resolution.json": version_resolution.to_dict(),
-        "image_resolution.json": image_resolution.to_dict(),
+        "resolved_task.json": resolved_task.to_dict(),
+        "final_version_decision.json": final_version_decision.to_dict(),
+        "evidence.json": [item.to_dict() for item in evidence],
+        "reproduction_profile.json": reproduction_profile.to_dict(),
+        "artifact_facts.json": [item.to_dict() for item in artifact_facts],
+        "artifact_plan.json": artifact_plan.to_dict(),
         "env_spec.json": env_spec.to_dict(),
         "artifacts.json": artifacts.to_dict(),
         "validation.json": validation.to_dict(),

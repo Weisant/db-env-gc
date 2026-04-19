@@ -53,12 +53,7 @@ def resolve_image_source(task: TaskInput) -> ImageResolution:
         for namespace, repository in _build_repository_candidates(normalized_db_type):
             checked_candidates.append(f"{namespace}/{repository}:{requested_version}")
 
-            repo_exists = _repository_exists(namespace, repository)
-            if not repo_exists:
-                continue
-
             tag_exists = _tag_exists(namespace, repository, requested_version)
-            related_tags = _list_related_tags(namespace, repository, requested_version)
             if tag_exists:
                 image_ref = _build_image_ref(namespace, repository, requested_version)
                 return ImageResolution(
@@ -74,8 +69,16 @@ def resolve_image_source(task: TaskInput) -> ImageResolution:
                     notes=[f"Docker Hub 上存在官方镜像 tag：{namespace}/{repository}:{requested_version}"],
                 )
 
+            repo_exists = _repository_exists(namespace, repository)
+            related_tags = _list_related_tags(namespace, repository, requested_version)
+            if not repo_exists:
+                continue
+
             notes = [
-                f"已确认官方仓库 {namespace}/{repository} 存在，但未找到精确 tag {requested_version}。"
+                (
+                    f"已确认官方仓库 {namespace}/{repository} 存在，"
+                    f"但未找到精确 tag {requested_version}。"
+                )
             ]
             if related_tags:
                 notes.append("相关 tag 参考：" + ", ".join(related_tags[:10]))
@@ -102,7 +105,9 @@ def resolve_image_source(task: TaskInput) -> ImageResolution:
             strategy="custom_dockerfile",
             availability="repo_missing",
             checked_candidates=checked_candidates,
-            notes=["未找到可确认的 Docker Hub 官方仓库，已回退到 Dockerfile。"],
+            notes=[
+                "未通过 Docker Hub API 确认到官方仓库或精确 tag，已保守回退到 Dockerfile。"
+            ],
         )
     except RuntimeError as exc:
         return ImageResolution(

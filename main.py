@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agent.agent import DBEnvGenerationAgent
+from agent.runtime.agent import DBEnvGenerationAgent
 
 
 class TeeStream:

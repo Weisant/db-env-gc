@@ -35,4 +35,8 @@ def parse_task(raw_request: str, client: JsonChatClient) -> TaskInput:
     # 无论模型是否回显 `raw_request`，这里都以当前真实输入为准，避免上下文漂移。
     task_data = dict(response)
     task_data["raw_request"] = raw_request
-    return TaskInput.from_dict(task_data)
+    task_data.setdefault("project_name", "")
+    task = TaskInput.from_dict(task_data)
+    task.requested_version = task.version
+    task.effective_version = ""
+    return task

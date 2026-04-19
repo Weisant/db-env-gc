@@ -4,6 +4,9 @@ version = "0.3.0"
 description = "Plan-and-execute style database environment generator"
 readme = "README.md"
 requires-python = ">=3.10"
+dependencies = [
+    "openai>=2.30.0",
+]
 
 [tool.setuptools]
 py-modules = []

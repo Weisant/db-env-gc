@@ -2,322 +2,189 @@
 
 这个目录实现了 `db-env-gc` 的核心多 agent 流水线。
 
-项目整体采用 `Plan-and-Execute` 方式运行，由一个主调度器按顺序调用多个 LLM agent，并通过项目根目录下的 `tools/` 完成真实文件系统操作。
+项目整体采用 `Plan-and-Execute` 方式运行，由一个主调度器按顺序调用多个 LLM agent，并通过项目根目录下的 `tools/` 完成外部证据收集、制品事实查询和真实文件系统操作。
 
 ## 整体处理流程
 
-入口在 [main.py](/home/wjh/db-env-gc/main.py)，主调度逻辑在 [agent.py](/home/wjh/db-env-gc/agent/agent.py)。
-
-完整流程如下：
-
-1. 用户在终端输入数据库环境生成需求
-2. `main.py` 初始化运行环境、日志文件和主调度器
-3. 主调度器按固定计划依次调用各个 agent
-4. 每个 agent 输出结构化 JSON，作为下一个 agent 的输入
-5. `tools/` 先查询项目内置的官方源码源，确认数据库版本是否真实存在
-6. `tools/` 再查询 Docker Hub 官方镜像与 tag 是否可用，确定后续走 `image:` 还是 `Dockerfile`
-7. `tools/` 负责把 generator 产出的文件内容写到真实项目目录
-8. validator 基于真实磁盘快照做校验，并在必要时直接触发修复
-9. 最终再由 `tools/` 写入 `state/` 目录
+入口在 [main.py](/db-env-gc/main.py)，主调度逻辑在 [agent.py](/db-env-gc/agent/agent.py)。
 
 当前主链路为：
 
-`用户输入 -> parser -> tools(版本解析) -> tools(镜像解析) -> planner -> generator -> tools写盘 -> validator(含按需修复) -> tools写状态`
+`用户输入 -> parser -> tools(证据收集) -> reproduction_profile -> artifact_plan(直接调用镜像/源码工具) -> planner -> generator -> tools写盘 -> validator(含按需修复) -> tools写状态`
+
+它的设计重点不是先把漏洞分成固定类别，而是先把外部证据转成“复现约束画像”，让后续阶段围绕约束求解环境。
 
 ## 主调度器
 
-主调度器位于 [agent.py](/home/wjh/db-env-gc/agent/agent.py)。
+主调度器位于 [agent.py](/db-env-gc/agent/agent.py)。
 
 它负责：
 
 - 定义执行计划 `create_plan()`
 - 维护上下文对象：
   - `TaskInput`
-  - `VersionResolution`
-  - `ImageResolution`
+  - `EvidenceItem`
+  - `ReproductionProfile`
+  - `ArtifactFact`
+  - `ArtifactPlan`
   - `EnvSpec`
   - `ProjectArtifacts`
   - `ValidationReport`
-- 控制 agent 的调用顺序
+- 控制各阶段调用顺序
 - 在终端打印 `Thought / Action / Observation / Step Result`
 - 将各阶段结构化输出写入 `agents_log.txt`
 
 主调度器本身不直接生成文件内容，也不直接做低层文件读写，它只负责：
+
 - 编排 agent
 - 调用 `tools/`
 - 汇总状态
 
-## 各 Agent 说明
+## 各阶段说明
 
 ### 1. Parser Agent
 
-位置：[parser.py](/home/wjh/db-env-gc/agent/parser.py)  
-提示词：[prompts/parser.md](/home/wjh/db-env-gc/agent/prompts/parser.md)
+位置：[parser.py](/db-env-gc/agent/parser.py)  
+提示词：[prompts/parser.md](/db-env-gc/agent/prompts/parser.md)
 
 作用：
 
 - 将用户自然语言请求标准化为 `TaskInput`
-- 统一提取并规范字段，例如：
-  - `db_type`
-  - `version`
-  - `port`
-  - `database`
-  - `username`
-  - `password`
-  - `config`
-  - `project_name`
+- 提取 `db_type`、`version`、`port`、`database`、`username`、`password`、`config` 等字段
 
-处理逻辑：
+它只回答“用户想要什么”，不负责解释漏洞世界。
 
-1. 接收原始输入 `raw_request`
-2. 调用 LLM
-3. 要求模型只输出 JSON
-4. 使用 [models.py](/home/wjh/db-env-gc/agent/models.py) 中的 `TaskInput.from_dict()` 做结构化校验
+### 2. Evidence Tools
 
-它的目标是让后续所有 agent 共用同一份干净、稳定的任务输入。
-
-### 2. Version Resolution Tool
-
-位置：[version_source_tools.py](/home/wjh/db-env-gc/tools/version_source_tools.py)
+位置：[evidence_tools.py](/db-env-gc/tools/evidence_tools.py)
 
 作用：
 
-- 根据项目内置的官方源码源规则确认数据库版本是否真实存在
-- 在版本不存在时阻止主流程继续为错误版本生成环境
-- 支持为同一数据库配置多个官方来源候选，按顺序尝试命中
+- 当任务带有 `cve_id` 时，收集外部证据
+- 当前优先尝试 NVD、Debian、Ubuntu、Red Hat 等高可信来源
+- 输出结构化 `EvidenceItem[]`
 
-处理逻辑：
+它只负责收集事实，不直接给出复现方案。
 
-1. 接收 `TaskInput`
-2. 根据数据库类型选择内置官方源码源和候选源码包命名规则
-3. 检查请求版本对应的源码包是否存在
-4. 输出 `VersionResolution`
+### 3. Reproduction Profile Agent
 
-它的目标是把“版本真实性”变成一条可回溯的工具链判断，而不是留给后续阶段隐式猜测。
-
-### 3. Image Resolution Tool
-
-位置：[registry_tools.py](/home/wjh/db-env-gc/tools/registry_tools.py)
+位置：[reproduction_profile.py](/db-env-gc/agent/reproduction_profile.py)  
+提示词：[prompts/reproduction_profile.md](/db-env-gc/agent/prompts/reproduction_profile.md)
 
 作用：
 
-- 根据 `TaskInput` 中的数据库类型和版本查询 Docker Hub 官方镜像可用性
-- 决定后续应走 `official_image` 还是 `custom_dockerfile` 分支
+- 根据 `TaskInput + EvidenceItem[]` 生成 `ReproductionProfile`
+- 把“漏洞语义”转成“环境必须满足的约束”
 
-处理逻辑：
+画像会显式描述：
 
-1. 接收 `TaskInput`
-2. 尝试映射到 Docker Hub 官方仓库候选
-3. 查询仓库是否存在、目标 tag 是否存在
-4. 输出 `ImageResolution`
+- `required_artifacts`
+- `required_components`
+- `required_relationships`
+- `required_runtime_conditions`
+- `required_configuration`
+- `required_setup_steps`
+- `forbidden_choices`
+- `verification_targets`
 
-它的目标是把“镜像是否真实可用”从 LLM 决策中剥离出来，变成一个可回溯的结构化前置步骤。
+### 4. Artifact Plan Agent
 
-### 4. Planner Agent
-
-位置：[planner.py](/home/wjh/db-env-gc/agent/planner.py)  
-提示词：[prompts/planner.md](/home/wjh/db-env-gc/agent/prompts/planner.md)
-
-作用：
-
-- 根据 `TaskInput + ImageResolution` 生成环境规划 `EnvSpec`
-- 先定义项目结构和约束，而不是直接写文件
-
-处理逻辑：
-
-1. 接收 `TaskInput`
-2. 调用 LLM 生成规划结果
-3. 输出：
-  - `project_name`
-  - `objective`
-  - `suggested_files`
-  - `constraints`
-  - `assumptions`
-4. 使用 `EnvSpec.from_dict()` 转成结构化对象
-
-它的目标是把“这次项目应该长什么样”先规划清楚，再交给 generator 执行。
-
-### 5. Generator Agent
-
-位置：[generator.py](/home/wjh/db-env-gc/agent/generator.py)  
-提示词：[prompts/generator.md](/home/wjh/db-env-gc/agent/prompts/generator.md)
+位置：[artifact_plan.py](/db-env-gc/agent/artifact_plan.py)  
+提示词：[prompts/artifact_plan.md](/db-env-gc/agent/prompts/artifact_plan.md)
 
 作用：
 
-- 根据 `TaskInput + ImageResolution + EnvSpec` 直接生成完整 Docker 项目文件集合
+- 直接调用 Docker Hub 与源码地址工具收集制品事实
+- 基于 `TaskInput + ReproductionProfile + ArtifactFact[]` 生成 `ArtifactPlan`
+- 决定最终更适合走镜像还是源码构建
 
-处理逻辑：
+这一步的目标是把“画像约束 + 外部事实”收敛成统一制品计划，而不是让纯工具层自己拍板。
 
-1. 接收任务信息和环境规划
-2. 调用 LLM
-3. 输出 `ProjectArtifacts`
-4. 每个文件对象包含：
-  - `path`
-  - `purpose`
-  - `content`
+### 5. Planner Agent
 
-通常会生成：
-
-- `docker-compose.yml`
-- `.env.example`
-- `README.md`
-- `config/...`
-- `init/...`
-
-它是项目中真正生成文件内容的核心 agent。
-
-注意：
-
-- generator 只生成内容
-- 真正写入磁盘由项目根目录下的 `tools/` 完成
-
-### 6. Validator Agent
-
-位置：[validator.py](/home/wjh/db-env-gc/agent/validator.py)  
-提示词：[prompts/validator.md](/home/wjh/db-env-gc/agent/prompts/validator.md)
+位置：[planner.py](/db-env-gc/agent/planner.py)  
+提示词：[prompts/planner.md](/db-env-gc/agent/prompts/planner.md)
 
 作用：
 
-- 从交付质量角度检查真实磁盘项目是否完整、自洽、可交付
-- 在必要时直接触发修复并通过 tools 覆盖文件
+- 根据 `TaskInput + ReproductionProfile + ArtifactPlan` 生成 `EnvSpec`
+- 先定义项目结构、交付方式和关键约束，而不是直接写文件
 
-处理逻辑：
+`EnvSpec` 当前会显式携带：
 
-1. 接收：
-  - `TaskInput`
-  - `VersionResolution`
-  - `ImageResolution`
-  - `EnvSpec`
-  - 真实磁盘快照
-2. 调用 LLM
-3. 输出 `ValidationReport`
+- `deployment_approach`
+- `base_image`
+- `install_method`
+- `requires_dockerfile`
+- `suggested_files`
+- `constraints`
+- `assumptions`
 
-校验报告包含：
+### 6. Generator Agent
 
-- `passed`
-- `findings`
-- `warnings`
-- `repair_instructions`
-
-重点检查内容：
-
-- 文件是否齐全
-- `docker-compose.yml` 是否具备基础可运行结构
-- 数据库类型、版本、端口、账号、配置是否和任务一致
-- `config/`、`init/`、README 是否互相一致
-- README 是否清晰说明启动方式、目录结构和关键配置
-
-它的目标是把“生成完成”提升为“可交付完成”，并在可修复时直接完成闭环。
-
-### 7. Tools Layer
-
-位置：
-
-- [tools/file_tools.py](/home/wjh/db-env-gc/tools/file_tools.py)
-- [tools/project_tools.py](/home/wjh/db-env-gc/tools/project_tools.py)
-- [tools/registry_tools.py](/home/wjh/db-env-gc/tools/registry_tools.py)
-- [tools/state_tools.py](/home/wjh/db-env-gc/tools/state_tools.py)
-- [tools/version_source_tools.py](/home/wjh/db-env-gc/tools/version_source_tools.py)
+位置：[generator.py](/db-env-gc/agent/generator.py)  
+提示词：[prompts/generator.md](/db-env-gc/agent/prompts/generator.md)
 
 作用：
 
-- 负责真实的文件系统动作，例如：
-  - 查询内置官方源码源并确认版本存在性
-  - 查询 Docker Hub 官方镜像与 tag
-  - 创建运行目录
-  - 写入项目文件
-  - 读取项目快照
-  - 覆盖修复后的文件
-  - 写入 `state` 状态文件
+- 根据 `TaskInput + ReproductionProfile + ArtifactPlan + EnvSpec` 生成完整 Docker 项目文件集合
+- 输出 `ProjectArtifacts`
 
-这些 tools 不参与内容生成；其中一部分负责镜像可用性判断，另一部分负责文件系统执行。
+它只生成内容，不写盘。
+
+### 7. Validator Agent
+
+位置：[validator.py](/db-env-gc/agent/validator.py)  
+提示词：
+
+- [prompts/validator.md](/db-env-gc/agent/prompts/validator.md)
+- [prompts/validator_repair.md](/db-env-gc/agent/prompts/validator_repair.md)
+
+作用：
+
+- 基于真实磁盘快照校验项目是否完整、自洽、可交付
+- 在必要时执行自动修复
+
+它现在主要关注 Docker 项目的运行性，而不是严格做漏洞语义审计。
 
 ## LLM 调用层
 
 位置：
 
-- [llm.py](/home/wjh/db-env-gc/agent/llm.py)
-- [config.py](/home/wjh/db-env-gc/agent/config.py)
+- [llm.py](/db-env-gc/agent/llm.py)
+- [config.py](/db-env-gc/agent/config.py)
 
 作用：
 
-- 从 [agent/.env](/home/wjh/db-env-gc/agent/.env) 读取模型配置
+- 从 [agent/.env](/db-env-gc/agent/.env) 读取模型配置
 - 统一向兼容 OpenAI 的接口发请求
 - 强制要求返回 JSON
 - 去掉模型偶尔返回的代码块包裹
 
-也就是说，当前真正调用 LLM 的是：
+当前真正调用 LLM 的是：
 
 - parser
+- reproduction_profile
 - planner
 - generator
 - validator
 
-它们都通过这层能力去调用 LLM。
-
 ## 数据流
 
-结构化模型定义在 [models.py](/home/wjh/db-env-gc/agent/models.py)。
+结构化模型定义在 [models/](/home/wjh/db-env-gc/agent/models/) 包下。
 
-关键对象包括：
+当前核心数据流为：
 
-- `TaskInput`
-- `VersionResolution`
-- `ImageResolution`
-- `EnvSpec`
-- `ProjectArtifacts`
-- `ValidationReport`
-- `PipelineResult`
-
-数据流转关系为：
-
-`raw_request -> TaskInput -> VersionResolution -> ImageResolution -> EnvSpec -> ProjectArtifacts -> ValidationReport -> PipelineResult`
-
-这些对象的作用分别是：
-
-- `TaskInput`：标准化用户需求
-- `VersionResolution`：数据库版本真实性校验结果
-- `ImageResolution`：官方镜像可用性与镜像策略判定结果
-- `EnvSpec`：环境规划结果
-- `ProjectArtifacts`：完整项目文件集合
-- `ValidationReport`：校验与修复建议
-- `PipelineResult`：最终运行汇总结果
-
-## 终端日志机制
-
-终端里会看到类似下面的结构：
-
-- `Thought`
-- `Action`
-- `Observation`
-- `Step Result`
-
-这些内容不是 agent 自己直接打印的，而是主调度器在 [agent.py](/home/wjh/db-env-gc/agent/agent.py) 中统一输出的执行日志风格。
-
-目的有两个：
-
-- 让用户看到当前执行到了哪一步
-- 让一次运行的上下文更容易排查和复现
+`raw_request -> TaskInput -> EvidenceItem[] -> ReproductionProfile -> ArtifactFact[] -> ArtifactPlan -> EnvSpec -> ProjectArtifacts -> ValidationReport -> PipelineResult`
 
 其中：
 
-- `Thought`：当前步骤为什么要做
-- `Action`：调用了哪个 agent 或模块
-- `Observation`：该步骤的结构化输出
-- `Step Result`：本阶段的简短结论
-
-## 总结
-
-这个目录实现的是一个由 orchestrator 驱动的全 agent 流水线系统：
-
-- `parser / planner / generator / validator` 是当前的核心 LLM agent
-- `tools` 既负责版本真实性解析、镜像可用性解析，也负责文件系统执行
-- validator 已经内聚了“发现问题后按需修复”的能力
-- 最终产出完整的 Docker 项目和状态文件
-
-如果后续还要扩展，可以继续在这个目录下增加：
-
-- 更强的 repair 闭环
-- 多轮 replan
-- 外部检索 agent
-- 镜像兼容性验证 agent
+- `TaskInput`：标准化后的用户任务
+- `EvidenceItem`：外部证据条目
+- `ReproductionProfile`：证据驱动的复现约束画像
+- `ArtifactFact`：底层工具查到的镜像 tag / 源码下载等事实
+- `ArtifactPlan`：LLM 基于画像和事实生成的结构化制品计划
+- `EnvSpec`：环境规划结果
+- `ProjectArtifacts`：待写盘的完整文件集合
+- `ValidationReport`：校验结果
+- `PipelineResult`：一次完整运行的汇总结果
