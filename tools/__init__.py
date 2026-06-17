@@ -1,29 +1,46 @@
-"""工具层统一导出。
+"""Unified exports for the tools layer.
 
-这个目录负责两类共享能力：
-1. 非 LLM 的确定性辅助步骤，例如证据收集和制品解析
-2. 文件系统相关操作，例如写盘、读快照、写状态
+This directory provides two shared capability groups:
+1. Deterministic non-LLM helper steps, such as evidence collection and artifact resolution
+2. Filesystem operations, such as creating project directories and writing generated files
 """
 
-from tools.project_tools import (
-    create_run_directory,
-    overwrite_project_files,
-    read_project_snapshot,
-    write_project,
+from tools.project_tools import create_run_directory, write_project
+from tools.url_probe_tools import check_download_url
+from tools.package_tools import check_package_dependencies, check_package_version
+from tools.evidence_tools import (
+    build_unavailable_nvd_info,
+    build_user_supplied_database_decision,
+    cve_info_to_evidence_items,
+    fetch_nvd_cve_info,
+    fetch_official_advisories,
+    integrate_cve_info,
+    load_cached_cve_info,
+    normalize_cve_id,
+    normalize_database_type,
+    save_cached_cve_info,
 )
-from tools.evidence_tools import collect_cve_evidence, ensure_database_related_evidence
-from tools.registry_tools import resolve_image_source
-from tools.state_tools import write_pipeline_state
-from tools.version_source_tools import resolve_version_source
+from tools.registry_tools import (
+    check_image_ref,
+    resolve_image_source_for_candidates,
+)
 
 __all__ = [
-    "collect_cve_evidence",
+    "build_unavailable_nvd_info",
+    "build_user_supplied_database_decision",
+    "check_image_ref",
+    "check_download_url",
+    "check_package_dependencies",
+    "check_package_version",
+    "cve_info_to_evidence_items",
     "create_run_directory",
-    "ensure_database_related_evidence",
-    "overwrite_project_files",
-    "read_project_snapshot",
-    "resolve_image_source",
-    "resolve_version_source",
+    "fetch_nvd_cve_info",
+    "fetch_official_advisories",
+    "integrate_cve_info",
+    "load_cached_cve_info",
+    "normalize_cve_id",
+    "normalize_database_type",
+    "resolve_image_source_for_candidates",
+    "save_cached_cve_info",
     "write_project",
-    "write_pipeline_state",
 ]

@@ -1,4 +1,4 @@
-"""模型层通用校验辅助函数。"""
+"""Common validation helper functions for the model layer."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import Any
 
 
 def _ensure_str(value: Any, field_name: str, default: str = "") -> str:
-    """把任意值规范成字符串。"""
+    """Normalize any value into a string."""
     if value is None:
         return default
     if not isinstance(value, str):
@@ -15,7 +15,7 @@ def _ensure_str(value: Any, field_name: str, default: str = "") -> str:
 
 
 def _ensure_dict_of_str(value: Any, field_name: str) -> dict[str, str]:
-    """把任意字典规范成 `str -> str` 结构。"""
+    """Normalize any dictionary into a `str -> str` structure."""
     if value is None:
         return {}
     if not isinstance(value, dict):
@@ -27,7 +27,7 @@ def _ensure_dict_of_str(value: Any, field_name: str) -> dict[str, str]:
 
 
 def _ensure_list_of_str(value: Any, field_name: str) -> list[str]:
-    """把任意列表规范成字符串列表。"""
+    """Normalize any list into a list of strings."""
     if value is None:
         return []
     if not isinstance(value, list):
@@ -36,7 +36,7 @@ def _ensure_list_of_str(value: Any, field_name: str) -> list[str]:
 
 
 def _ensure_bool(value: Any, field_name: str, default: bool = False) -> bool:
-    """把任意值规范成布尔值。"""
+    """Normalize any value into a boolean."""
     if value is None:
         return default
     if not isinstance(value, bool):
@@ -45,7 +45,7 @@ def _ensure_bool(value: Any, field_name: str, default: bool = False) -> bool:
 
 
 def _ensure_list_of_dict(value: Any, field_name: str) -> list[dict[str, Any]]:
-    """把任意列表规范成对象列表。"""
+    """Normalize any list into a list of objects."""
     if value is None:
         return []
     if not isinstance(value, list):

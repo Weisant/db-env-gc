@@ -1,0 +1,17 @@
+{"db_type":"clickhouse","images":["clickhouse/clickhouse-server"],"policy":"check","notes":["Extracted from db_build_path_catalog official_image."]}
+{"db_type":"cratedb","images":["crate"],"policy":"check","notes":["Extracted from db_build_path_catalog official_image."]}
+{"db_type":"couchdb","images":["couchdb"],"policy":"check","notes":["Extracted from db_build_path_catalog official_image."]}
+{"db_type":"duckdb","images":["duckdb/duckdb"],"policy":"check","notes":["Extracted from db_build_path_catalog official_image."]}
+{"db_type":"elasticsearch","images":["elasticsearch"],"policy":"check","notes":["Extracted from db_build_path_catalog official_image."]}
+{"db_type":"h2database","images":[],"policy":"skip_if_no_suitable_image","notes":["No DockerHub image was provided in db_build_path_catalog official_image."]}
+{"db_type":"influxdb","images":["influxdb"],"policy":"check","notes":["Extracted from db_build_path_catalog official_image."]}
+{"db_type":"mariadb","images":["mariadb"],"policy":"check","notes":["Extracted from db_build_path_catalog official_image."]}
+{"db_type":"mongo","images":["mongodb/mongodb-community-server"],"policy":"check","notes":["Extracted from db_build_path_catalog official_image."]}
+{"db_type":"mysql","images":["mysql"],"policy":"check","notes":["Extracted from db_build_path_catalog official_image."]}
+{"db_type":"neo4j","images":["neo4j"],"policy":"check","notes":["Extracted from db_build_path_catalog official_image."]}
+{"db_type":"opentsdb","images":["opentsdb/opentsdb"],"policy":"check","notes":["Extracted from db_build_path_catalog official_image."]}
+{"db_type":"postgres","images":["postgres"],"policy":"check","notes":["Extracted from db_build_path_catalog official_image."]}
+{"db_type":"redis","images":["redis"],"policy":"check","notes":["Extracted from db_build_path_catalog official_image."]}
+{"db_type":"solr","images":["solr"],"policy":"check","notes":["Extracted from db_build_path_catalog official_image."]}
+{"db_type":"sqlite","images":["sqlite"],"policy":"check","notes":["Extracted from db_build_path_catalog official_image."]}
+{"db_type":"tidb","images":["pingcap/tidb"],"policy":"check","notes":["Extracted from db_build_path_catalog official_image."]}

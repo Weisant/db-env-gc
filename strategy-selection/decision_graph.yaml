@@ -1,0 +1,311 @@
+
+name: db_build_strategy_graph
+version: 1.1
+
+source_diagram: strategy-selection/image.png
+template_catalog: templates/db_build_path_catalog.jsonl
+
+entry_node: relevance_type
+
+nodes:
+  - id: relevance_type
+    type: decision
+    description: Classify the vulnerable artifact relevance type.
+
+  - id: official_image
+    type: action
+    description: Prefer official database image when no source build is required.
+
+  - id: check_official_image
+    type: tool_check
+    tool: check_image
+    description: Verify whether official image and selected version tag exist.
+
+  - id: template_recommended_path
+    type: template_read
+    template: db_build_path_catalog
+    description: Read db_build_path_catalog.jsonl to determine recommended path, fallback order, official image hint, and build style.
+
+  - id: official_image_direct
+    type: terminal
+    description: Use official image directly.
+
+  - id: official_image_extended
+    type: terminal
+    description: Extend official image with extra packages, tools, configs, or init scripts.
+
+  - id: source_build
+    type: action
+    description: Build database or component from source.
+
+  - id: needs_source_build
+    type: decision
+    description: Determine whether source-sensitive construction is required.
+
+  - id: server_daemon
+    type: decision
+    description: Source-built target is a database server daemon.
+
+  - id: embedded_library
+    type: decision
+    description: Source-built target is an embedded database library.
+
+  - id: multi_stage_server
+    type: terminal
+    description: Use multi-stage Docker build for server daemon.
+
+  - id: single_stage_embedded
+    type: terminal
+    description: Use single-stage Docker build for embedded library.
+
+  - id: distribution_package
+    type: decision
+    description: Vulnerability belongs to a distribution-packaged database artifact.
+
+  - id: package_repo_strategy
+    type: decision
+    description: Decide whether language, system, or custom package repo is needed.
+
+  - id: language_package_repo
+    type: terminal
+    description: Install vulnerable package from a language package repository.
+
+  - id: system_package_repo
+    type: terminal
+    description: Install vulnerable package from system package repository.
+
+  - id: custom_package_repo
+    type: terminal
+    description: Configure official, archived, vendor, or custom package repository.
+
+  - id: use_templates
+    type: template_read
+    template: db_build_path_catalog
+    description: Read database-specific template when package route is insufficient or ambiguous.
+
+  - id: prebuilt_binary
+    type: terminal
+    description: Use official prebuilt binary archive.
+
+  - id: package_repo
+    type: action
+    description: Use package repository path and return to package repository strategy.
+
+  - id: unsupported
+    type: terminal
+    description: No build strategy should be selected for unrelated or unsupported profiles.
+
+edges:
+  - from: relevance_type
+    to: unsupported
+    condition:
+      any:
+        - field: profile_status
+          op: eq
+          value: unsupported
+        - field: asset.relevance_type
+          op: eq
+          value: unrelated
+    when: >
+      profile_status == unsupported
+      or relevance_type == unrelated
+
+  - from: relevance_type
+    to: distribution_package
+    condition:
+      field: asset.relevance_type
+      op: eq
+      value: distribution_package
+    when: "relevance_type == distribution_package"
+
+  - from: relevance_type
+    to: needs_source_build
+    condition:
+      field: asset.relevance_type
+      op: in
+      value: [core_server, builtin_component, official_extension, official_tool]
+    when: >
+      relevance_type in [core_server, builtin_component, official_extension, official_tool]
+
+  - from: needs_source_build
+    to: source_build
+    condition:
+      field: construction_constraints.requires_source_build
+      op: eq
+      value: true
+    when: >
+      profiler determined that the required environment cannot be constructed
+      from an image, binary, or package and therefore requires source compilation
+
+  - from: needs_source_build
+    to: official_image
+    condition:
+      default: true
+    when: >
+      requires_source_build == false; continue with image and catalog strategies
+
+  - from: official_image
+    to: check_official_image
+    condition:
+      always: true
+    when: "official image route is selected"
+
+  - from: check_official_image
+    to: template_recommended_path
+    condition:
+      fact: image_available
+      op: eq
+      value: true
+    when: "official image and selected version tag are found; read catalog to decide direct vs extended"
+
+  - from: check_official_image
+    to: source_build
+    condition:
+      fact: source_required_after_image_miss
+      op: eq
+      value: true
+    when: >
+      official image or selected version tag is not found
+      and source build is required by the profile
+
+  - from: check_official_image
+    to: use_templates
+    condition:
+      fact: image_available
+      op: eq
+      value: false
+    when: >
+      official image or selected version tag is not found
+      and source build is not clearly required; use catalog fallback_order
+
+  - from: template_recommended_path
+    to: official_image_direct
+    condition:
+      fact: needs_extended_image
+      op: eq
+      value: false
+    when: "template says no extra tools, packages, configs, or init scripts are required"
+
+  - from: template_recommended_path
+    to: official_image_extended
+    condition:
+      fact: needs_extended_image
+      op: eq
+      value: true
+    when: "template says extra tools, packages, configs, extensions, or init scripts are required"
+
+  - from: source_build
+    to: server_daemon
+    condition:
+      fact: source_build_style
+      op: eq
+      value: multi_stage_server
+    when: "source artifact is a server daemon or database service"
+
+  - from: source_build
+    to: embedded_library
+    condition:
+      fact: source_build_style
+      op: eq
+      value: single_stage_embedded
+    when: "source artifact is an embedded library"
+
+  - from: server_daemon
+    to: multi_stage_server
+    condition:
+      always: true
+    when: "server daemon source build is selected"
+
+  - from: embedded_library
+    to: single_stage_embedded
+    condition:
+      always: true
+    when: "embedded library source build is selected"
+
+  - from: distribution_package
+    to: package_repo_strategy
+    condition:
+      always: true
+    when: "distribution package route is selected"
+
+  - from: package_repo_strategy
+    to: language_package_repo
+    condition:
+      fact: language_package_sufficient
+      op: eq
+      value: true
+    when: "profile facts identify a language package repository artifact"
+
+  - from: package_repo_strategy
+    to: system_package_repo
+    condition:
+      fact: system_package_sufficient
+      op: eq
+      value: true
+    when: "profile facts are sufficient for ordinary system package installation"
+
+  - from: package_repo_strategy
+    to: custom_package_repo
+    condition:
+      fact: custom_package_required
+      op: eq
+      value: true
+    when: "profile facts identify an official vendor repo, archive repo, URL, .deb, .rpm, or custom repo"
+
+  - from: package_repo_strategy
+    to: use_templates
+    condition:
+      default: true
+    when: "profile facts are insufficient; read catalog fallback_order"
+
+  - from: use_templates
+    to: source_build
+    condition:
+      fact: catalog_next_path
+      op: eq
+      value: source_build
+    when: "catalog recommended_path or fallback_order recommends source_build"
+
+  - from: use_templates
+    to: prebuilt_binary
+    condition:
+      fact: catalog_next_path
+      op: eq
+      value: prebuilt_binary
+    when: "catalog recommended_path or fallback_order recommends prebuilt_binary"
+
+  - from: use_templates
+    to: package_repo
+    condition:
+      fact: catalog_next_path
+      op: eq
+      value: package_repo
+    when: "catalog recommended_path or fallback_order recommends package_repo"
+
+  - from: package_repo
+    to: package_repo_strategy
+    condition:
+      always: true
+    when: "package repository path requires concrete repo selection"
+
+terminal_plans:
+  official_image_direct:
+    build_path: official_image_direct
+  official_image_extended:
+    build_path: official_image_extended
+  system_package_repo:
+    build_path: system_package_repo
+  language_package_repo:
+    build_path: language_package_repo
+  custom_package_repo:
+    build_path: custom_package_repo
+  prebuilt_binary:
+    build_path: prebuilt_binary
+  multi_stage_server:
+    build_path: source_compile
+    build_style: multi_stage_server
+  single_stage_embedded:
+    build_path: source_compile
+    build_style: single_stage_embedded
+  unsupported:
+    build_path: source_compile

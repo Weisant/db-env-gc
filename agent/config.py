@@ -1,4 +1,4 @@
-"""LLM 配置读取工具。"""
+"""LLM configuration loader."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ PROMPTS_DIR = BASE_DIR / "prompts"
 
 
 def load_env_file(path: Path) -> dict[str, str]:
-    """读取简单的 KEY=VALUE 配置文件。"""
+    """Read a simple KEY=VALUE configuration file."""
     values: dict[str, str] = {}
     if not path.exists():
         return values
@@ -28,7 +28,7 @@ def load_env_file(path: Path) -> dict[str, str]:
 
 
 def read_required_setting(values: dict[str, str], key: str) -> str:
-    """优先从本地配置读取，不存在时再读环境变量。"""
+    """Read from local config first, then from environment variables."""
     value = values.get(key) or os.environ.get(key)
     if not value:
         raise ValueError(f"Missing required setting: {key}")
@@ -37,24 +37,23 @@ def read_required_setting(values: dict[str, str], key: str) -> str:
 
 @dataclass(frozen=True)
 class AgentSettings:
-    """所有 agent 共用的 LLM 配置集合。
+    """Shared LLM configuration set for all agents.
 
-    支持一套默认模型加四个阶段级覆盖：
-    - 如果某阶段没有显式配置，就回退到 DEFAULT_MODEL
-    - 为兼容旧配置，DEFAULT_MODEL 缺失时仍尝试读取 MODEL_NAME
+    Supports one default model plus per-stage overrides:
+    - If a stage is not configured explicitly, fall back to DEFAULT_MODEL.
     """
 
     api_key: str
     base_url: str
     default_model: str
     parser_model: str
+    profiler_model: str
     planner_model: str
     generator_model: str
-    validator_model: str
 
 
 def load_settings() -> AgentSettings:
-    """加载运行 LLM 客户端所需配置。"""
+    """Load settings required to run the LLM client."""
     values = load_env_file(CONFIG_FILE)
     default_model = (
         values.get("DEFAULT_MODEL")
@@ -70,13 +69,13 @@ def load_settings() -> AgentSettings:
         parser_model=values.get("PARSER_MODEL")
         or os.environ.get("PARSER_MODEL")
         or default_model,
+        profiler_model=values.get("PROFILER_MODEL")
+        or os.environ.get("PROFILER_MODEL")
+        or default_model,
         planner_model=values.get("PLANNER_MODEL")
         or os.environ.get("PLANNER_MODEL")
         or default_model,
         generator_model=values.get("GENERATOR_MODEL")
         or os.environ.get("GENERATOR_MODEL")
-        or default_model,
-        validator_model=values.get("VALIDATOR_MODEL")
-        or os.environ.get("VALIDATOR_MODEL")
         or default_model,
     )

@@ -1,0 +1,377 @@
+{
+  "id": 1,
+  "db_type": "clickhouse",
+  "recommended_path": "package_repo",
+  "fallback_order": [
+    "source_build"
+  ],
+  "source_url": "https://github.com/ClickHouse/ClickHouse/archive/refs/tags/v$VERSION-stable.zip",
+  "source_url_fallbacks": [
+    "https://github.com/ClickHouse/ClickHouse/archive/refs/tags/v$VERSION-stable.tar.gz"
+  ],
+  "binary_url": "",
+  "custom_repo": "deb https://mirrors.aliyun.com/clickhouse/deb/stable main/",
+  "build_style": "",
+  "notes": [
+    "When package_repo: prefer ubuntu:20.04 and install exact versions of clickhouse-common-static, clickhouse-server, and clickhouse-client from the configured APT repository.",
+    "Install gnupg and dirmngr, then import key E0C56BD4 from keyserver.ubuntu.com before updating the ClickHouse repository.",
+    "For legacy packages, install libcap2-bin and run `setcap -r /usr/bin/clickhouse` without `|| true` before switching to the clickhouse user.",
+    "Run clickhouse-server as the clickhouse user and ensure its data, log, and configuration directories have appropriate permissions.",
+    "When source_build: ClickHouse source builds require CMake/Ninja, Python, and project-specific build dependencies; do not treat the GitHub source archive as a simple configure/make build."
+  ]
+}
+
+{
+  "id": 2,
+  "db_type": "cratedb",
+  "recommended_path": "source_build",
+  "fallback_order": [],
+  "source_url": "https://github.com/crate/crate/archive/refs/tags/$VERSION.zip",
+  "source_url_fallbacks": [
+    "https://github.com/crate/crate/archive/refs/tags/$VERSION.tar.gz"
+  ],
+  "binary_url": "",
+  "custom_repo": "",
+  "build_style": "",
+  "notes": [
+    "When source_build: CrateDB source builds require an appropriate OpenJDK runtime and Java build tooling such as the Gradle wrapper; include the Java build toolchain in dependency checks.",
+    "When a Java base image is needed: prefer modern maintained DockerHub candidates such as eclipse-temurin:8-jdk or eclipse-temurin:8-jdk-jammy for Java 8-era source builds; verify the chosen image with check_image_ref before using it in Dockerfile."
+  ]
+}
+
+{
+  "id": 3,
+  "db_type": "couchdb",
+  "recommended_path": "source_build",
+  "fallback_order": [],
+  "source_url": "https://archive.apache.org/dist/couchdb/source/$VERSION/apache-couchdb-$VERSION.tar.gz",
+  "source_url_fallbacks": [
+    "https://github.com/apache/couchdb/archive/refs/tags/$VERSION.tar.gz",
+    "https://github.com/apache/couchdb/archive/refs/tags/$VERSION.zip"
+  ],
+  "binary_url": "",
+  "custom_repo": "",
+  "build_style": "multi_stage_server",
+  "notes": [
+    "Install exact CouchDB version from source.",
+    "Template variable $VERSION must be replaced with generation_requirements.version.selected before generating files.",
+    "Use multi-stage builds in the Dockerfile: the first stage completes compilation, and the second stage only copies the runtime artifacts.",
+    "CouchDB source builds require Erlang/OTP and project build tools such as rebar/autoconf-style dependencies; include them in source_compile dependency checks."
+  ]
+}
+
+{
+  "id": 4,
+  "db_type": "duckdb",
+  "recommended_path": "source_build",
+  "fallback_order": [],
+  "source_url": "https://github.com/duckdb/duckdb/archive/refs/tags/v$VERSION.zip",
+  "source_url_fallbacks": [
+    "https://github.com/duckdb/duckdb/archive/refs/tags/v$VERSION.tar.gz"
+  ],
+  "binary_url": "",
+  "custom_repo": "",
+  "build_style": "",
+  "notes": [
+    "When source_build: DuckDB GitHub source builds use CMake/Make and may require Python during build generation; include CMake and Python in source_compile dependency checks."
+  ]
+}
+
+{
+  "id": 5,
+  "db_type": "elasticsearch",
+  "recommended_path": "prebuilt_binary",
+  "fallback_order": [
+    "source_build"
+  ],
+  "source_url": "https://github.com/elastic/elasticsearch/archive/refs/tags/v$VERSION.zip",
+  "source_url_fallbacks": [
+    "https://github.com/elastic/elasticsearch/archive/refs/tags/v$VERSION.tar.gz"
+  ],
+  "binary_url": "https://repo1.maven.org/maven2/org/elasticsearch/elasticsearch/$VERSION/elasticsearch-$VERSION.tar.gz",
+  "custom_repo": "",
+  "build_style": "",
+  "notes": [
+    "Template variable $VERSION must be replaced with generation_requirements.version.selected before generating files.",
+    "When prebuilt_binary: use a verified Java runtime base image. Prefer modern maintained DockerHub candidates such as eclipse-temurin:8-jre or eclipse-temurin:8-jre-jammy for Java 8-era Elasticsearch releases; verify the chosen image with check_image_ref before using it in Dockerfile.",
+    "When source_build fallback is used: Elasticsearch source builds require an appropriate OpenJDK and Gradle-based Java build tooling; do not use generic C build dependencies.",
+    "When source_build fallback is used and a Java build base image is needed: prefer modern maintained DockerHub candidates such as eclipse-temurin:8-jdk or eclipse-temurin:8-jdk-jammy for Java 8-era releases; verify the chosen image with check_image_ref before using it in Dockerfile."
+  ]
+}
+
+{
+  "id": 6,
+  "db_type": "h2database",
+  "recommended_path": "prebuilt_binary",
+  "fallback_order": [
+    "source_build"
+  ],
+  "source_url": "https://github.com/h2database/h2database/archive/refs/tags/version-$VERSION.zip",
+  "source_url_fallbacks": [
+    "https://github.com/h2database/h2database/archive/refs/tags/version-$VERSION.tar.gz"
+  ],
+  "binary_url": "https://repo1.maven.org/maven2/com/h2database/h2/$VERSION/h2-$VERSION.jar",
+  "custom_repo": "",
+  "build_style": "",
+  "notes": [
+    "Template variable $VERSION must be replaced with generation_requirements.version.selected before generating files.",
+    "When prebuilt_binary: Uses an appropriate OpenJDK version as the base image, determined by the runtime requirements of the target H2 Database version.",
+    "When prebuilt_binary: prefer modern maintained DockerHub Java runtime candidates such as eclipse-temurin:8-jre or eclipse-temurin:8-jre-jammy for Java 8-era H2 releases; verify the chosen image with check_image_ref before using it in Dockerfile.",
+    "When source_build fallback is used: H2 source builds require OpenJDK and Java build tooling; do not use generic C build dependencies.",
+    "When source_build fallback is used and a Java build base image is needed: prefer modern maintained DockerHub candidates such as eclipse-temurin:8-jdk or eclipse-temurin:8-jdk-jammy for Java 8-era releases; verify the chosen image with check_image_ref before using it in Dockerfile."
+  ]
+}
+
+{
+  "id": 7,
+  "db_type": "influxdb",
+  "recommended_path": "prebuilt_binary",
+  "fallback_order": [
+    "source_build"
+  ],
+  "source_url": "https://github.com/influxdata/influxdb/archive/refs/tags/v$VERSION.zip",
+  "source_url_fallbacks": [
+    "https://github.com/influxdata/influxdb/archive/refs/tags/v$VERSION.tar.gz"
+  ],
+  "binary_url": "https://dl.influxdata.com/influxdb/releases/influxdb_$VERSION_amd64.deb",
+  "custom_repo": "",
+  "build_style": "",
+  "notes": [
+    "Template variable $VERSION must be replaced with generation_requirements.version.selected before generating files.",
+    "When source_build fallback is used: InfluxDB source builds require a Go toolchain matching the target release; include Go build dependencies instead of generic C-only dependencies."
+  ]
+}
+
+{
+  "id": 8,
+  "db_type": "mariadb",
+  "recommended_path": "prebuilt_binary",
+  "fallback_order": [
+    "source_build"
+  ],
+  "source_url": "https://archive.mariadb.org/mariadb-$VERSION/source/mariadb-$VERSION.tar.gz",
+  "source_url_fallbacks": [
+    "https://archive.mariadb.org/mariadb-$VERSION/source/mariadb-$VERSION.tar.gz"
+  ],
+  "binary_url": "https://archive.mariadb.org/mariadb-$VERSION/bintar-linux-systemd-x86_64/mariadb-$VERSION-linux-systemd-x86_64.tar.gz",
+  "custom_repo": "",
+  "build_style": "multi_stage_server",
+  "notes": {
+    "common": [
+      "Replace $VERSION with generation_requirements.version.selected before generating any download URL, source directory, binary tarball name, or installation path.",
+      "Use a MariaDB artifact that exactly matches the selected version; do not replace it with latest, a nearby major release, or a different stable release.",
+      "Before startup, prepare a data directory and initialize MariaDB system tables with mariadb-install-db or mysql_install_db.",
+      "Ensure the data directory is owned by the mysql user when the server is started as mysql.",
+      "Use /var/lib/mysql as the conventional Linux data directory unless the generated environment explicitly sets another datadir.",
+      "After installation or extraction, verify the server with mariadbd or mariadbd-safe and verify connectivity with the mariadb or mysql client.",
+      "When generating custom configuration, ensure the selected installation method actually reads the generated my.cnf file."
+    ],
+    "by_path": {
+      "source_build": [
+        "Follow the official source-build workflow: install build tools and development headers, obtain the source code, configure with CMake, compile with cmake --build, install with cmake --install, initialize system tables, then start and verify the server.",
+        "Prefer the official source tarball for stable and reproducible version-specific builds; Git builds are more suitable for development branches and require submodule initialization.",
+        "Use an out-of-source CMake build directory to keep the source tree clean.",
+        "Include required build tools and headers such as compiler toolchain, git, cmake, bison, flex, ncurses development headers, SSL or GnuTLS development headers, zlib development headers, libaio, and Boost.",
+        "If building on a distribution that supports build dependency resolution, enable source repositories and use the native build-dependency command, such as apt build-dep, dnf builddep, or zypper source-install, when appropriate.",
+        "Configure the build with CMake options such as CMAKE_INSTALL_PREFIX for the install path, CMAKE_BUILD_TYPE=RelWithDebInfo for a release-like debug-symbol build, WITH_SSL for the SSL backend, and BUILD_CONFIG=mysql_release when matching official release-style builds is desired.",
+        "Add feature-specific dependencies only when required by the selected vulnerability or configuration, such as libcurl for the S3 storage engine, Kerberos headers for GSSAPI, compression libraries for RocksDB or MyRocks, systemd headers for systemd support, and PAM headers for authentication plugins.",
+        "If CMake fails, use the reported missing dependency as the repair target instead of guessing; common failures include missing C++ compiler, old Bison, missing GSSAPI headers, missing curses headers, or insufficient build disk space.",
+        "If CMake options are changed during regeneration, clean the build directory cache rather than deleting the source directory."
+      ],
+      "prebuilt_binary": [
+        "Use official MariaDB binary tarballs only when the selected version, operating system family, CPU architecture, GLIBC requirement, and systemd requirement are compatible with the target image.",
+        "Binary tarballs are precompiled archives containing executables, libraries, and deployment dependencies; they can be unpacked into a user-selected directory and can support multiple MariaDB versions on the same system.",
+        "Download the correct binary tarball for the target machine; MariaDB binary tarballs follow a version and operating-system naming pattern.",
+        "Check GLIBC compatibility before selecting older binary tarballs; tarballs marked with GLIBC requirements require a runtime system with at least the indicated GLIBC version.",
+        "When using systemd-marked tarballs, ensure the runtime environment satisfies the documented systemd and GLIBC requirements.",
+        "Extract the binary tarball into a stable installation prefix such as /usr/local/mysql or another explicit directory.",
+        "Use a symbolic link to the extracted version directory when multiple MariaDB versions may coexist or when switching versions is expected.",
+        "After extraction, run mariadb-install-db from the extracted installation to initialize the system tables before starting the server.",
+        "Avoid accidentally using an old system-wide /etc/my.cnf or /etc/mysql/my.cnf from another MariaDB or MySQL installation; if necessary, pass --defaults-file as the first option to mariadb-install-db, mariadbd-safe, and client commands.",
+        "After extraction and initialization, update PATH or call client and server binaries through their absolute paths so that the generated environment uses the tarball installation rather than a system-installed MariaDB."
+      ]
+    }
+  }
+}
+
+{
+  "id": 9,
+  "db_type": "mongo",
+  "recommended_path": "prebuilt_binary",
+  "fallback_order": [
+    "source_build"
+  ],
+  "source_url": "https://github.com/mongodb/mongo/archive/refs/tags/v$VERSION.zip",
+  "source_url_fallbacks": [
+    "https://github.com/mongodb/mongo/archive/refs/tags/r$VERSION.tar.gz",
+    "https://github.com/mongodb/mongo/archive/refs/tags/r$VERSION.zip"
+  ],
+  "binary_url": "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-$DISTRO-$VERSION.tgz",
+  "custom_repo": "",
+  "build_style": "",
+  "notes": [
+    "Template variable $VERSION must be replaced with generation_requirements.version.selected before generating files.",
+    "Template variable $DISTRO must be selected according to the base image and target MongoDB release; do not assume a generic Linux tarball exists.",
+    "When source_build fallback is used: MongoDB source builds require Python/SCons and a compatible C++ toolchain; include those build-system dependencies in source_compile dependency checks."
+  ]
+}
+
+{
+  "id": 10,
+  "db_type": "mysql",
+  "recommended_path": "source_build",
+  "fallback_order": [],
+  "source_url": "https://github.com/mysql/mysql-server/archive/mysql-$VERSION.tar.gz",
+  "source_url_fallbacks": [
+    "https://github.com/mysql/mysql-server/archive/refs/tags/mysql-$VERSION.tar.gz",
+    "https://github.com/mysql/mysql-server/archive/refs/tags/mysql-$VERSION.zip"
+  ],
+  "binary_url": "",
+  "custom_repo": "",
+  "build_style": "multi_stage_server",
+  "notes": [
+    "Template variable $VERSION must be replaced with generation_requirements.version.selected before generating files.",
+    "Use multi-stage builds in the Dockerfile: the first stage completes compilation, and the second stage only copies the runtime artifacts.",
+    "MySQL source builds use CMake and server build dependencies such as Bison and required development libraries; include CMake/Bison-style dependencies in source_compile dependency checks."
+  ]
+}
+
+{
+  "id": 11,
+  "db_type": "neo4j",
+  "recommended_path": "source_build",
+  "fallback_order": [],
+  "source_url": "https://github.com/neo4j/neo4j/archive/refs/tags/$VERSION.zip",
+  "binary_url": "",
+  "custom_repo": "",
+  "build_style": "multi_stage_server",
+  "notes": [
+    "When source_build: Neo4j source builds require an appropriate OpenJDK and Java build tooling such as Maven; include the Java build toolchain in dependency checks.",
+    "When a Java build base image is needed: prefer modern maintained DockerHub candidates such as eclipse-temurin:8-jdk or eclipse-temurin:8-jdk-jammy for Java 8-era releases; verify the chosen image with check_image_ref before using it in Dockerfile."
+  ]
+}
+
+{
+  "id": 12,
+  "db_type": "opentsdb",
+  "recommended_path": "prebuilt_binary",
+  "fallback_order": [
+    "source_build"
+  ],
+  "source_url": "https://github.com/OpenTSDB/opentsdb/archive/refs/tags/v$VERSION.zip",
+  "source_url_fallbacks": [
+    "https://github.com/OpenTSDB/opentsdb/archive/refs/tags/v$VERSION.tar.gz"
+  ],
+  "binary_url": "https://github.com/OpenTSDB/opentsdb/releases/download/v$VERSION/opentsdb-$VERSION_all.deb",
+  "custom_repo": "",
+  "build_style": "",
+  "notes": [
+    "Template variable $VERSION must be replaced with generation_requirements.version.selected before generating files.",
+    "Template variable $HBASE_VERSION should come from generation_requirements.artifact_requirements or manual_notes; if absent, the generator should infer a compatible HBase version and document the inferred value and rationale in README.md.",
+    "When prebuilt_binary: Uses an appropriate OpenJDK version as the base image and HBase version by https://archive.apache.org/dist/hbase/$HBASE_VERSION/hbase-$HBASE_VERSION-bin.tar.gz, determined by the runtime requirements of the target OpenTSDB version.",
+    "When prebuilt_binary: prefer modern maintained DockerHub Java runtime candidates such as eclipse-temurin:8-jre or eclipse-temurin:8-jre-jammy for Java 8-era OpenTSDB/HBase releases; verify the chosen image with check_image_ref before using it in Dockerfile.",
+    "When source_build fallback is used: OpenTSDB source builds require OpenJDK and Java build tooling such as Maven; include them in source_compile dependency checks.",
+    "When source_build fallback is used and a Java build base image is needed: prefer modern maintained DockerHub candidates such as eclipse-temurin:8-jdk or eclipse-temurin:8-jdk-jammy for Java 8-era releases; verify the chosen image with check_image_ref before using it in Dockerfile."
+  ]
+}
+
+{
+  "id": 13,
+  "db_type": "postgresql",
+  "recommended_path": "source_build",
+  "fallback_order": [],
+  "source_url": "https://ftp.postgresql.org/pub/source/v$VERSION/postgresql-$VERSION.tar.gz",
+  "source_url_fallbacks": [
+    "https://ftp.postgresql.org/pub/source/v$VERSION/postgresql-$VERSION.tar.bz2"
+  ],
+  "binary_url": "",
+  "custom_repo": "",
+  "build_style": "multi_stage_server",
+  "notes": [
+    "Template variable $VERSION must be replaced with generation_requirements.version.selected before generating files.",
+    "Use multi-stage builds in the Dockerfile: the first stage completes compilation, and the second stage only copies the runtime artifacts.",
+    "PostgreSQL source builds should include development libraries required by the selected configure options, commonly readline and zlib for a standard server and CLI build."
+  ]
+}
+
+{
+  "id": 14,
+  "db_type": "redis",
+  "recommended_path": "source_build",
+  "fallback_order": [],
+  "source_url": "https://download.redis.io/releases/redis-$VERSION.tar.gz",
+  "source_url_fallbacks": [
+    "https://github.com/redis/redis/archive/refs/tags/$VERSION.tar.gz",
+    "https://github.com/redis/redis/archive/refs/tags/$VERSION.zip"
+  ],
+  "binary_url": "",
+  "custom_repo": "",
+  "build_style": "multi_stage_server",
+  "notes": [
+    "Template variable $VERSION must be replaced with generation_requirements.version.selected before generating files.",
+    "Use multi-stage builds in the Dockerfile: the first stage completes compilation, and the second stage only copies the runtime artifacts.",
+    "Redis release source builds normally require a C toolchain and make; Tcl is only required if the generated Dockerfile runs the Redis test suite."
+  ]
+}
+
+{
+  "id": 15,
+  "db_type": "solr",
+  "recommended_path": "prebuilt_binary",
+  "fallback_order": [
+    "source_build"
+  ],
+  "source_url": "https://github.com/apache/solr/archive/refs/tags/releases/solr/$VERSION.zip",
+  "source_url_fallbacks": [
+    "https://github.com/apache/lucene-solr/archive/refs/tags/releases/lucene-solr/$VERSION.tar.gz",
+    "https://archive.apache.org/dist/lucene/solr/$VERSION/solr-$VERSION-src.tgz"
+  ],
+  "binary_url": "https://archive.apache.org/dist/lucene/solr/$VERSION/solr-$VERSION.tgz",
+  "custom_repo": "",
+  "build_style": "",
+  "notes": [
+    "Template variable $VERSION must be replaced with generation_requirements.version.selected before generating files.",
+    "When prebuilt_binary: Uses an appropriate OpenJDK version as the base image, determined by the runtime requirements of the target Solr version.",
+    "When prebuilt_binary: prefer modern maintained DockerHub Java runtime candidates such as eclipse-temurin:8-jre or eclipse-temurin:8-jre-jammy for Java 8-era Solr releases; verify the chosen image with check_image_ref before using it in Dockerfile.",
+    "When source_build fallback is used: Solr source builds require an appropriate OpenJDK and Java build tooling such as Gradle/Ant depending on the target release; include the Java build toolchain in dependency checks.",
+    "When source_build fallback is used and a Java build base image is needed: prefer modern maintained DockerHub candidates such as eclipse-temurin:8-jdk or eclipse-temurin:8-jdk-jammy for Java 8-era releases; verify the chosen image with check_image_ref before using it in Dockerfile."
+  ]
+}
+
+{
+  "id": 16,
+  "db_type": "sqlite",
+  "recommended_path": "source_build",
+  "fallback_order": [],
+  "source_url": "https://codeload.github.com/sqlite/sqlite/zip/refs/tags/version-$VERSION",
+  "source_url_fallbacks": [
+    "https://codeload.github.com/sqlite/sqlite/tar.gz/refs/tags/version-$VERSION",
+    "https://github.com/sqlite/sqlite/archive/refs/tags/version-$VERSION.tar.gz"
+  ],
+  "binary_url": "",
+  "custom_repo": "",
+  "build_style": "single_stage_embedded",
+  "notes": [
+    "Template variable $VERSION must be replaced with generation_requirements.version.selected before generating files.",
+    "Use single_stage_embedded builds in the Dockerfile.",
+    "SQLite GitHub source tree builds require tcl-dev during build because make generates sqlite3.c from Tcl scripts such as tool/mksqlite3c.tcl; include the corresponding base-image package in source_compile dependency checks and Dockerfile installs."
+  ]
+}
+
+{
+  "id": 17,
+  "db_type": "tidb",
+  "recommended_path": "prebuilt_binary",
+  "fallback_order": [],
+  "source_url": "https://github.com/pingcap/tidb/archive/refs/tags/v$VERSION.zip",
+  "source_url_fallbacks": [
+    "https://github.com/pingcap/tidb/archive/refs/tags/v$VERSION.tar.gz"
+  ],
+  "binary_url": "https://tiup-mirrors.pingcap.com/install.sh",
+  "custom_repo": "",
+  "build_style": "",
+  "notes": [
+    "TiDB is recommended to install and manage components through TiUP. In the Dockerfile, the specified versions of TiDB, PD, and TiKV are installed using tiup install playground tidb:v$VERSION pd:v$VERSION tikv:v$VERSION.",
+    "TiDB is a distributed database system. A minimal runnable environment usually needs to include the tidb, pd, and tikv components together, rather than installing only a single tidb-server process."
+  ]
+}

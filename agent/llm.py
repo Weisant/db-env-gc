@@ -1,7 +1,6 @@
-"""基于 OpenAI Python SDK 的最小 JSON 对话客户端。
+"""Minimal JSON chat client based on the OpenAI Python SDK.
 
-这个模块只负责和 OpenAI 接口通信。
-如果配置了 `base_url`，也允许通过官方 SDK 调用兼容 OpenAI 协议的网关。
+This module only communicates with the OpenAI interface. If `base_url` is configured, it can also call an OpenAI-compatible gateway through the official SDK.
 """
 
 from __future__ import annotations
@@ -9,6 +8,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 
@@ -16,7 +16,7 @@ from agent.config import AgentSettings
 
 
 def _strip_json_fence(text: str) -> str:
-    """移除模型偶尔返回的 Markdown 代码块包裹。"""
+    """Remove occasional Markdown code fences returned by the model."""
     stripped = text.strip()
     if stripped.startswith("```json"):
         stripped = stripped[len("```json") :].strip()
@@ -28,15 +28,25 @@ def _strip_json_fence(text: str) -> str:
     return stripped
 
 
+def _usage_value(usage: Any, key: str) -> int:
+    """Read token usage fields from SDK objects or dict-like gateway responses."""
+    if isinstance(usage, dict):
+        value = usage.get(key, 0)
+    else:
+        value = getattr(usage, key, 0)
+    return int(value or 0)
+
+
 @dataclass
 class JsonChatClient:
-    """通过 OpenAI Python SDK 请求 JSON 响应。"""
+    """Request JSON responses through the OpenAI Python SDK."""
 
     settings: AgentSettings
     _client: OpenAI = field(init=False, repr=False)
+    _token_usage: dict[str, int] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        """根据配置初始化底层 OpenAI SDK 客户端。"""
+        """Initialize the underlying OpenAI SDK client from settings."""
         base_url = self.settings.base_url.strip()
         client_kwargs = {
             "api_key": self.settings.api_key,
@@ -45,6 +55,12 @@ class JsonChatClient:
         if base_url:
             client_kwargs["base_url"] = base_url
         self._client = OpenAI(**client_kwargs)
+        self._token_usage = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "calls": 0,
+        }
 
     def chat_json(
         self,
@@ -55,7 +71,7 @@ class JsonChatClient:
         model: str | None = None,
         timeout_seconds: int = 180,
     ) -> dict:
-        """发送一次 JSON 对话请求，并在轻微网络抖动时自动重试。"""
+        """Send one JSON chat request and retry automatically for minor network instability."""
         response = self._request_with_retry(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -63,11 +79,40 @@ class JsonChatClient:
             model=model or self.settings.default_model,
             timeout_seconds=timeout_seconds,
         )
+        self._record_token_usage(response)
 
         content = response.choices[0].message.content
         if not isinstance(content, str):
             raise RuntimeError("Model returned non-text content.")
         return json.loads(_strip_json_fence(content))
+
+    def token_usage_snapshot(self) -> dict[str, int]:
+        """Return the cumulative token usage observed by this client."""
+        return dict(self._token_usage)
+
+    def token_usage_delta(self, before: dict[str, int]) -> dict[str, int]:
+        """Return token usage consumed since a previous snapshot."""
+        current = self.token_usage_snapshot()
+        return {
+            key: current.get(key, 0) - before.get(key, 0)
+            for key in self._token_usage
+        }
+
+    def _record_token_usage(self, response: Any) -> None:
+        """Add successful response token usage to the cumulative counter."""
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            self._token_usage["calls"] += 1
+            return
+        prompt_tokens = _usage_value(usage, "prompt_tokens")
+        completion_tokens = _usage_value(usage, "completion_tokens")
+        total_tokens = _usage_value(usage, "total_tokens") or (
+            prompt_tokens + completion_tokens
+        )
+        self._token_usage["prompt_tokens"] += prompt_tokens
+        self._token_usage["completion_tokens"] += completion_tokens
+        self._token_usage["total_tokens"] += total_tokens
+        self._token_usage["calls"] += 1
 
     def _request_with_retry(
         self,
@@ -79,7 +124,7 @@ class JsonChatClient:
         timeout_seconds: int,
         max_retries: int = 2,
     ):
-        """执行 SDK 请求，并在网络层错误时做有限次重试。"""
+        """Execute the SDK request and perform limited retries for network-layer errors."""
         last_error: Exception | None = None
         for attempt in range(max_retries + 1):
             try:
